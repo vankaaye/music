@@ -630,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 19';
+const BUILD='build 20';
 
 /* ============================================================
    Small helpers
@@ -862,11 +862,23 @@ let currentAudioUrl=null;
 const audio=new Audio();
 audio.preload='metadata';
 audio.setAttribute('playsinline','');
-// Safari only offers AirPlay routing for a media element that is in the
-// document, so keep it attached (hidden — the app draws its own controls).
-audio.style.display='none';
-document.addEventListener('DOMContentLoaded',()=>{ try{ document.body.appendChild(audio); }catch(e){} });
-if(document.body){ try{ document.body.appendChild(audio); }catch(e){} }
+// Safari only offers AirPlay for a media element that is in the document and
+// actually rendered. An <audio> without `controls` draws nothing, so it is
+// invisible on its own — do NOT set display:none, which would take it out of
+// the render tree and with it the AirPlay route.
+// The default stylesheet forces `audio:not([controls]){display:none}` and an
+// inline style cannot override it, so the element would never enter the render
+// tree. Give it `controls` to keep it rendered — a route AirPlay can attach to
+// — and hide it with size and opacity instead. The app draws its own controls.
+audio.setAttribute('controls','');
+audio.setAttribute('x-webkit-airplay','allow');   // explicitly permit routing
+audio.removeAttribute('disableremoteplayback');
+audio.disableRemotePlayback=false;
+audio.style.cssText='position:fixed;left:0;bottom:0;width:1px;height:1px;'+
+                    'opacity:0;pointer-events:none;z-index:-1;overflow:hidden;';
+function attachAudio(){ try{ if(!audio.parentNode) document.body.appendChild(audio); }catch(e){} }
+document.addEventListener('DOMContentLoaded',attachAudio);
+if(document.body) attachAudio();
 
 function coverURL(t){
   if(!t||!t.cover) return null;
