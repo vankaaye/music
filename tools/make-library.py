@@ -17,6 +17,7 @@ library.json sits in the same folder as the audio.
 import argparse
 import json
 import os
+import re
 import struct
 import sys
 from urllib.parse import quote
@@ -90,8 +91,45 @@ def read_tags(path):
     return title, artist, album
 
 
+# ---- strip download-site branding, matching the app's own cleaning ----
+
+_TLD = ('com|net|in|info|org|co|me|se|cc|to|pk|is|biz|ws|xyz|club|link|site'
+        '|online|live|top|fun|pw')
+_JUNK_MARK = re.compile(
+    r'(?:www\.|https?://)|\.(?:' + _TLD + r')\b|'
+    r'\b(?:mp3|songspk|pagalworld|wapking|djmaza|masstamilan|isaimini|naasongs'
+    r'|atozmp3|isongs|sensongs|teluguwap|mr-?jatt|webmusic|downloaded\s*from'
+    r'|free\s*download|ringtone)\b', re.I)
+_BRACKETS = re.compile(r'[\[\(\{][^\[\]\(\)\{\}]*[\]\)\}]')
+_DOMAIN_WWW = re.compile(r'(^|[\s\-–—~|:_])(?:www\.)[A-Za-z0-9-]+\.[A-Za-z]{2,6}\b', re.I)
+_DOMAIN = re.compile(r'(^|[\s\-–—~|:_])[A-Za-z0-9][A-Za-z0-9-]*\.(?:' + _TLD + r')\b', re.I)
+_SITES = re.compile(
+    r'\b(?:naa\s*songs|naasongs|songs\s*pk|songspk|pagal\s*world|pagalworld'
+    r'|wapking|dj\s*maza|djmaza|masstamilan|isaimini|atoz\s*mp3|atozmp3|isongs'
+    r'|sen\s*songs|sensongs|telugu\s*wap|teluguwap|mr\.?-?jatt|webmusic'
+    r'|downloadming)\b', re.I)
+_TRACKNO = re.compile(r'^\s*\d{1,3}\s*[-–—._)\]]\s*')
+
+
+def strip_junk(s):
+    """Remove site branding and leading track numbers; '' if nothing survives."""
+    if not s:
+        return ''
+    out = str(s)
+    out = _BRACKETS.sub(lambda m: ' ' if _JUNK_MARK.search(m.group(0)) else m.group(0), out)
+    out = _DOMAIN_WWW.sub(r'\1', out)
+    out = _DOMAIN.sub(r'\1', out)
+    out = _SITES.sub(' ', out)
+    out = _TRACKNO.sub('', out)
+    out = re.sub(r'\s{2,}', ' ', out)
+    out = re.sub(r'^[\s\-–—_|~,.:]+|[\s\-–—_|~,.:]+$', '', out)
+    return out.strip()
+
+
 def from_filename(name):
     base = os.path.splitext(name)[0]
+    # clean before splitting, or "[iSongs.info] 03 - Song" makes the site the artist
+    base = strip_junk(base) or base
     if ' - ' in base:
         a, t = base.split(' - ', 1)
         return t.strip() or None, a.strip() or None
@@ -155,10 +193,18 @@ def main():
             rel = os.path.relpath(full, root).replace(os.sep, '/')
 
             title, artist, album = read_tags(full)
+            title = strip_junk(title) or None
+            artist = strip_junk(artist) or None
+            album = strip_junk(album) or None
             if not title or not artist:
                 ftitle, fartist = from_filename(fn)
                 title = title or ftitle
                 artist = artist or fartist
+            # untagged files usually sit in a per-album folder
+            if not album:
+                parent = os.path.dirname(rel)
+                if parent:
+                    album = strip_junk(parent.split('/')[-1]) or None
             if not title:
                 skipped += 1
 
