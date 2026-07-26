@@ -45,7 +45,7 @@ input{font-family:inherit}
 .hidden{display:none!important}
 
 /* ---------- App shell ---------- */
-#app{display:flex;flex-direction:column;height:100%;position:relative}
+#app{display:flex;flex-direction:column;height:100vh;height:100dvh;position:relative}
 
 /* ---------- Top bar ---------- */
 #topbar{
@@ -181,9 +181,10 @@ input{font-family:inherit}
   -webkit-backdrop-filter:saturate(180%) blur(20px);
   border:1px solid var(--line);
   display:flex;align-items:center;gap:10px;padding:0 8px 0 8px;
-  transform:translateY(160%);transition:transform .3s cubic-bezier(.2,.8,.2,1);
+  transform:translateY(160%);opacity:0;visibility:hidden;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1),opacity .3s ease,visibility .3s;
 }
-#mini.show{transform:translateY(0)}
+#mini.show{transform:translateY(0);opacity:1;visibility:visible}
 #mini .progress{position:absolute;left:0;top:0;height:2px;background:var(--accent);width:0}
 #mini .art{width:48px;height:48px;border-radius:7px;background:var(--panel-2);flex:none;overflow:hidden;position:relative}
 #mini .art img{width:100%;height:100%;object-fit:cover}
@@ -251,6 +252,24 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 /* volume */
 .np-vol{display:flex;align-items:center;gap:10px;margin:14px 2px 0}
 .np-vol svg{width:18px;height:18px;fill:rgba(255,255,255,.6);flex:none}
+
+/* add-source action sheet */
+#sheet{position:absolute;inset:0;z-index:65;display:flex;flex-direction:column;justify-content:flex-end}
+.sheet-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.5)}
+.sheet-card{
+  position:relative;margin:0 8px calc(var(--sab) + 8px);
+  background:rgba(44,44,46,.98);
+  backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  border-radius:16px;overflow:hidden;
+  animation:sheetUp .25s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes sheetUp{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+.sheet-title{text-align:center;font-size:13px;color:var(--text-2);padding:14px 8px 8px}
+.sheet-opt{display:block;width:100%;padding:16px;font-size:18px;color:var(--accent);border-top:1px solid var(--line);text-align:center;background:none}
+.sheet-opt:active{background:rgba(255,255,255,.06)}
+.sheet-cancel{display:block;width:100%;padding:16px;font-size:18px;font-weight:600;color:var(--text);border-top:7px solid rgba(0,0,0,.35);text-align:center;background:none}
+.sheet-cancel:active{background:rgba(255,255,255,.06)}
+@media (prefers-reduced-motion:reduce){.sheet-card{animation:none}}
 
 /* import overlay */
 #importOverlay{
@@ -377,6 +396,18 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
   <div id="dropHint" class="hidden">Drop to add music</div>
 
   <input type="file" id="fileInput" accept="audio/*" multiple class="hidden">
+  <input type="file" id="folderInput" accept="audio/*" multiple webkitdirectory directory class="hidden">
+
+  <!-- Add-source action sheet -->
+  <div id="sheet" class="hidden" role="dialog" aria-label="Add music">
+    <div class="sheet-backdrop" id="sheetBackdrop"></div>
+    <div class="sheet-card">
+      <div class="sheet-title">Add Music</div>
+      <button class="sheet-opt" id="optFiles">Choose Files…</button>
+      <button class="sheet-opt" id="optFolder">Choose Folder…</button>
+      <button class="sheet-cancel" id="optCancel">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -618,7 +649,9 @@ function displayTitle(t){ return t.title || t.name.replace(/\.[^.]+$/,''); }
    Import flow
 ============================================================ */
 let persistRequested=false;
-async function pickAndImport(){ $('#fileInput').click(); }
+function pickAndImport(){ openAddSheet(); }
+function openAddSheet(){ $('#sheet').classList.remove('hidden'); }
+function closeAddSheet(){ $('#sheet').classList.add('hidden'); }
 
 async function importFiles(fileList){
   const files=Array.from(fileList).filter(f=>/^audio\//.test(f.type)||/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus)$/i.test(f.name));
@@ -1155,6 +1188,11 @@ function reflectShuffleRepeat(){
 function wireEvents(){
   $('#addBtn').onclick=pickAndImport;
   $('#fileInput').onchange=e=>{ importFiles(e.target.files); e.target.value=''; };
+  $('#folderInput').onchange=e=>{ importFiles(e.target.files); e.target.value=''; };
+  $('#sheetBackdrop').onclick=closeAddSheet;
+  $('#optCancel').onclick=closeAddSheet;
+  $('#optFiles').onclick=()=>{ closeAddSheet(); $('#fileInput').click(); };
+  $('#optFolder').onclick=()=>{ closeAddSheet(); $('#folderInput').click(); };
 
   $('#editBtn').onclick=()=>{ state.editMode=!state.editMode; render(); };
 
