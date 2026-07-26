@@ -576,6 +576,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
       <button class="sheet-opt" id="optFiles">Choose Files…</button>
       <button class="sheet-opt" id="optFolder">Choose Folder…</button>
       <button class="sheet-opt" id="optServer">Connect Server…</button>
+      <button class="sheet-opt" id="optClean">Clean Up Names</button>
       <button class="sheet-cancel" id="optCancel">Cancel</button>
     </div>
   </div>
@@ -629,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 16';
+const BUILD='build 17';
 
 /* ============================================================
    Small helpers
@@ -988,7 +989,7 @@ async function importFiles(fileList){
     const {title,artist}=deriveTitleArtist(tags,f.name);
     // Untagged files usually still live in a per-album folder, so fall back to
     // the containing folder's name before giving up on "Unknown Album".
-    const album=tags.album||folderAlbum(rel)||'Unknown Album';
+    const album=stripJunk(tags.album)||stripJunk(folderAlbum(rel))||'Unknown Album';
 
     const duration=await readDuration(f);
 
@@ -1011,11 +1012,59 @@ async function importFiles(fileList){
   render();
 }
 
+/* ---- Strip download-site branding out of tags and filenames ----
+   Files from sites like iSongs.info or AtoZmp3.in carry the site's name in the
+   title, artist or album. Remove that (and leading track numbers) while leaving
+   genuine parentheticals such as "(Original Motion Picture Soundtrack)" or
+   "(feat. …)" alone. Returns '' when nothing survives, so callers can fall back. */
+const JUNK_MARK=/(?:www\.|https?:\/\/)|\.(?:com|net|in|info|org|co|me|se|cc|to|pk|is|biz|ws|xyz|club|link|site|online|live|top|fun|pw)\b|\b(?:mp3|songspk|pagalworld|wapking|djmaza|masstamilan|isaimini|naasongs|atozmp3|isongs|sensongs|teluguwap|mr-?jatt|webmusic|downloaded\s*from|free\s*download|ringtone)\b/i;
+const JUNK_TLD='com|net|in|info|org|co|me|se|cc|to|pk|is|biz|ws|xyz|club|link|site|online|live|top|fun|pw';
+const JUNK_SITES=/\b(?:naa\s*songs|naasongs|songs\s*pk|songspk|pagal\s*world|pagalworld|wapking|dj\s*maza|djmaza|masstamilan|isaimini|atoz\s*mp3|atozmp3|isongs|sen\s*songs|sensongs|telugu\s*wap|teluguwap|mr\.?-?jatt|webmusic|downloadming)\b/gi;
+const JUNK_DOMAIN_WWW=new RegExp('(^|[\\s\\-–—~|:_])(?:www\\.)[A-Za-z0-9-]+\\.[A-Za-z]{2,6}\\b','gi');
+const JUNK_DOMAIN=new RegExp('(^|[\\s\\-–—~|:_])[A-Za-z0-9][A-Za-z0-9-]*\\.(?:'+JUNK_TLD+')\\b','gi');
+
+function stripJunk(s){
+  if(s==null) return '';
+  let out=String(s);
+  // bracketed credits: "[iSongs.info]", "(www.AtoZmp3.in)"
+  out=out.replace(/[\[\(\{][^\[\]\(\)\{\}]*[\]\)\}]/g,m=>JUNK_MARK.test(m)?' ':m);
+  // bare domains hanging off a separator
+  out=out.replace(JUNK_DOMAIN_WWW,'$1').replace(JUNK_DOMAIN,'$1');
+  // site names with no domain suffix
+  out=out.replace(JUNK_SITES,' ');
+  // leading track number: "03 - ", "05.", "3) "
+  out=out.replace(/^\s*\d{1,3}\s*[-–—._)\]]\s*/,'');
+  return out.replace(/\s{2,}/g,' ')
+            .replace(/^[\s\-–—_|~,.:]+|[\s\-–—_|~,.:]+$/g,'')
+            .trim();
+}
+
+/* Re-clean tracks already in the library. Runs once automatically after
+   upgrading, and can be repeated from the Add menu. */
+async function cleanLibraryNames(){
+  let changed=0;
+  for(const t of state.tracks){
+    const nt=stripJunk(t.title)||t.title;
+    const na=stripJunk(t.artist)||'Unknown Artist';
+    const nb=stripJunk(t.album)||'Unknown Album';
+    if(nt!==t.title||na!==t.artist||nb!==t.album){
+      t.title=nt; t.artist=na; t.album=nb;
+      if(dbAvailable){ try{ await dbPutTrack(t); }catch(e){} }
+      changed++;
+    }
+  }
+  if(changed) render();
+  return changed;
+}
+
 // Derive title/artist from ID3 tags, falling back to "Artist - Title" filename.
 function deriveTitleArtist(tags,filename){
-  let title=tags.title, artist=tags.artist;
+  let title=stripJunk(tags.title), artist=stripJunk(tags.artist);
+  const raw=filename.replace(/\.[^.]+$/,'');
   if(!title || !artist){
-    const base=filename.replace(/\.[^.]+$/,'');
+    // Clean before splitting: "[iSongs.info] 03 - Song" would otherwise make
+    // the site name the artist.
+    const base=stripJunk(raw)||raw;
     const parts=base.split(' - ');
     if(parts.length>=2){
       if(!artist) artist=parts[0].trim();
@@ -1025,7 +1074,7 @@ function deriveTitleArtist(tags,filename){
     }
   }
   if(!artist) artist='Unknown Artist';
-  if(!title) title=filename.replace(/\.[^.]+$/,'');
+  if(!title) title=stripJunk(raw)||raw;
   return {title,artist};
 }
 
@@ -1250,7 +1299,7 @@ async function syncRemote(opts){
       {title:f.title||tags.title, artist:f.artist||tags.artist}, f.name);
     const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size||0,
       title:derived.title, artist:derived.artist,
-      album:f.album||tags.album||'Unknown Album',
+      album:stripJunk(f.album)||stripJunk(tags.album)||'Unknown Album',
       duration:f.duration||0, cover:tags.cover||null,
       lyrics:tags.lyrics||null, audio:null };
     state.tracks.push(rec);
@@ -2269,6 +2318,9 @@ function wireEvents(){
   $('#optFiles').onclick=()=>{ closeAddSheet(); $('#fileInput').click(); };
   $('#optFolder').onclick=()=>{ closeAddSheet(); $('#folderInput').click(); };
   $('#optServer').onclick=()=>{ closeAddSheet(); openServerModal(); };
+  $('#optClean').onclick=async()=>{ closeAddSheet();
+    const n=await cleanLibraryNames();
+    showToast(n?('Cleaned up '+n+' track name'+(n!==1?'s':'')+'.'):'Nothing to clean — names look fine.'); };
 
   // server modal
   $('#serverBackdrop').onclick=closeServerModal;
@@ -2398,6 +2450,17 @@ async function boot(){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
     await loadServerCfg();
   }
+  // One-time pass over a library imported before names were being cleaned.
+  if(dbAvailable && state.tracks.length){
+    let done=null;
+    try{ done=await dbGetMeta('metaCleaned'); }catch(e2){}
+    if(!done||!done.v){
+      const n=await cleanLibraryNames();
+      try{ await dbSetMeta('metaCleaned',{v:1}); }catch(e2){}
+      if(n) setTimeout(()=>showToast('Cleaned download-site text from '+n+' track name'+(n!==1?'s':'')+'.'),800);
+    }
+  }
+
   reflectShuffleRepeat();
   render();
   if(dbAvailable) await restoreLastState();

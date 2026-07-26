@@ -12,7 +12,12 @@ device.
   each contain a track of the same name, and untagged files fall back to their
   containing folder as the album. Hand-written ID3v2
   tag parser (v2.2 / v2.3 / v2.4) reads title, artist, album and embedded
-  cover art, with a `Artist - Title` filename fallback. Browse by Songs,
+  cover art, with a `Artist - Title` filename fallback. Download-site branding
+  (`[iSongs.info]`, `[www.AtoZmp3.in]`, bare domains, leading track numbers) is
+  stripped from titles, artists and albums on import, while genuine
+  parentheticals like `(Original Motion Picture Soundtrack)` are kept; an
+  existing library is cleaned once automatically and **Clean Up Names** in the
+  Add menu re-runs it. Browse by Songs,
   Albums (artwork grid) or Artists, drill into a group, and search across
   title / artist / album. Edit mode removes songs. Shows song count and how
   much storage the library uses.
