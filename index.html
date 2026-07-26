@@ -629,7 +629,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 14';
+const BUILD='build 15';
 
 /* ============================================================
    Small helpers
@@ -1975,6 +1975,28 @@ function syncPlayUI(){
 ============================================================ */
 let airplayMode=null;   // 'webkit' | 'remote' | null
 
+/* Can this browser actually change output volume?
+   On iOS/iPadOS it cannot — volume is hardware-only. The property is not a
+   reliable signal there: iOS accepts the assignment and reads the value back
+   while the audio output is unchanged, so a slider bound to it would sit at a
+   level that has nothing to do with what you hear. Sniff the platform first,
+   then fall back to probing for browsers that reject the write outright. */
+function isIOS(){
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+         // iPadOS 13+ reports itself as a Mac; touch points give it away.
+         (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+}
+function volumeControlWorks(){
+  if(isIOS()) return false;
+  try{
+    const before=audio.volume;
+    audio.volume=0.42;
+    const ok=Math.abs(audio.volume-0.42)<0.001;
+    audio.volume=before;
+    return ok;
+  }catch(e){ return false; }
+}
+
 function setupAirplay(){
   const btn=$('#btnAirplay');
 
@@ -2345,13 +2367,7 @@ async function boot(){
 
   setupAirplay();
 
-  // iOS/iPadOS block programmatic audio volume (it's hardware-only there).
-  // Feature-detect and hide the volume slider where it can have no effect.
-  try{
-    audio.volume=0.5;
-    if(audio.volume===1){ $('#np').classList.add('no-vol'); }
-    audio.volume=state.volume;
-  }catch(e){ $('#np').classList.add('no-vol'); }
+  if(!volumeControlWorks()) $('#np').classList.add('no-vol');
 
   if(dbAvailable){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
