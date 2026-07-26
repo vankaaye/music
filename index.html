@@ -249,7 +249,39 @@ input{font-family:inherit}
 #npArt img{width:100%;height:100%;object-fit:cover}
 #npArt .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 #npArt .ph svg{width:72px;height:72px;fill:var(--text-2)}
-.np-titles{margin:8px 2px}
+/* lyrics */
+#npLyrics{flex:1;min-height:0;display:flex;flex-direction:column;margin:4px 0}
+.lyr-scroll{
+  flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:34% 2px 46%;
+  scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(transparent,#000 12%,#000 78%,transparent);
+  mask-image:linear-gradient(transparent,#000 12%,#000 78%,transparent);
+}
+.lyr-scroll::-webkit-scrollbar{display:none}
+.lyr-line{
+  font-size:23px;font-weight:800;line-height:1.26;letter-spacing:-.01em;
+  color:rgba(255,255,255,.32);
+  padding:9px 2px;cursor:pointer;
+  overflow-wrap:break-word;word-break:break-word;hyphens:auto;
+  transition:color .3s ease,transform .3s ease,opacity .3s ease;
+  transform-origin:left center;
+}
+.lyr-line.done{color:rgba(255,255,255,.42)}
+.lyr-line.active{color:#fff;transform:scale(1.04)}
+.lyr-line.blank{padding:3px 0}
+.lyr-plain{font-size:17px;line-height:1.65;color:rgba(255,255,255,.82);white-space:pre-wrap;font-weight:500;padding:2px}
+.lyr-msg{font-size:15px;color:rgba(255,255,255,.55);text-align:center;padding:26px 12px;line-height:1.5}
+.lyr-msg .sp{width:26px;height:26px;border:2.5px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;margin:0 auto 12px;animation:spin 1s linear infinite}
+.lyr-src{font-size:11px;color:rgba(255,255,255,.35);text-align:center;padding:14px 0 4px;letter-spacing:.02em}
+
+.np-titles{margin:8px 2px;display:flex;align-items:center;gap:10px}
+.np-titles .tt-block{flex:1;min-width:0}
+.lyr-toggle{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;background:rgba(255,255,255,.13)}
+.lyr-toggle svg{width:21px;height:21px;fill:rgba(255,255,255,.9)}
+.lyr-toggle.on{background:var(--accent)}
+.lyr-toggle.on svg{fill:#fff}
+@media (prefers-reduced-motion:reduce){ .lyr-line{transition:none} }
 .np-titles .t{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np-titles .s{font-size:18px;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 
@@ -451,9 +483,15 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
       <div class="np-art-wrap">
         <div id="npArt"><div class="ph"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div></div>
       </div>
+      <div id="npLyrics" class="hidden"><div class="lyr-scroll" id="lyrScroll"></div></div>
       <div class="np-titles">
-        <div class="t" id="npTitle">Not Playing</div>
-        <div class="s" id="npArtist"></div>
+        <div class="tt-block">
+          <div class="t" id="npTitle">Not Playing</div>
+          <div class="s" id="npArtist"></div>
+        </div>
+        <button id="btnLyrics" class="lyr-toggle" aria-label="Show lyrics">
+          <svg viewBox="0 0 24 24"><path d="M4 5.5h16v2H4v-2zm0 5h11v2H4v-2zm0 5h16v2H4v-2zm13-5h3v2h-3v-2z"/></svg>
+        </button>
       </div>
       <div class="np-scrub">
         <input type="range" class="bar" id="scrub" min="0" max="1000" value="0" step="1">
@@ -609,7 +647,7 @@ function findTerm(bytes,pos,doubleByte){
 }
 
 async function parseID3(file){
-  const result={title:null,artist:null,album:null,cover:null,coverType:null};
+  const result={title:null,artist:null,album:null,cover:null,coverType:null,lyrics:null};
   try{
     // read first bytes of header to determine size
     const headBuf=new Uint8Array(await file.slice(0,10).arrayBuffer());
@@ -657,8 +695,20 @@ async function parseID3(file){
       const isArtist= id==='TPE1'||id==='TP1';
       const isAlbum = id==='TALB'||id==='TAL';
       const isPic   = id==='APIC'||id==='PIC';
+      const isLyr   = id==='USLT'||id==='ULT';
 
-      if(isTitle||isArtist||isAlbum){
+      if(isLyr && !result.lyrics){
+        // USLT: encoding, 3-byte language, content descriptor (terminated), then the text.
+        try{
+          const enc=frame[0];
+          const dbl=(enc===1||enc===2);
+          let p=4;                       // encoding byte + 3-char language
+          const descEnd=findTerm(frame,p,dbl);
+          p=descEnd+(dbl?2:1);
+          const txt=decodeText(frame.subarray(p),enc).trim();
+          if(txt) result.lyrics=txt;     // may itself be LRC-timestamped
+        }catch(e){}
+      }else if(isTitle||isArtist||isAlbum){
         const enc=frame[0];
         const txt=decodeText(frame.subarray(1),enc).trim();
         if(txt){
@@ -846,6 +896,7 @@ async function importFiles(fileList){
       name:f.name, size:f.size,
       title, artist, album, duration,
       cover:tags.cover||null,
+      lyrics:tags.lyrics||null,   // embedded USLT, if the file has any
       audio:f,   // File is a Blob; stored directly
     };
     state.tracks.push(rec);
@@ -1021,7 +1072,8 @@ async function syncRemote(opts){
     try{ tags=await parseID3Remote(f.url,serverCfg); }catch(e){}
     const {title,artist}=deriveTitleArtist(tags,f.name);
     const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size,
-      title, artist, album:tags.album||'Unknown Album', duration:0, cover:tags.cover||null, audio:null };
+      title, artist, album:tags.album||'Unknown Album', duration:0, cover:tags.cover||null,
+      lyrics:tags.lyrics||null, audio:null };
     state.tracks.push(rec);
     if(dbAvailable){ try{ await dbPutTrack(rec); }catch(e){} }
     existing.add(f.url); added++;
@@ -1037,6 +1089,106 @@ async function syncRemote(opts){
 }
 
 function serverHost(){ try{ return new URL(serverCfg.base).host; }catch(e){ return serverCfg?serverCfg.base:''; } }
+
+/* ============================================================
+   Lyrics — embedded ID3 lyrics first, then LRCLIB (free, no key).
+   Time-stamped lines drive the Apple-style highlight; plain lyrics
+   are shown as static text. Results are cached for offline use.
+============================================================ */
+const LRC_TIME=/\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+
+// Parse LRC into [{t,text}]; returns null when there are no timestamps.
+function parseLRC(text){
+  if(!text) return null;
+  const out=[];
+  for(const raw of text.split(/\r?\n/)){
+    LRC_TIME.lastIndex=0;
+    const stamps=[];
+    let m;
+    while((m=LRC_TIME.exec(raw))!==null){
+      const mins=parseInt(m[1],10), secs=parseInt(m[2],10);
+      let frac=0;
+      if(m[3]!=null){ frac=parseInt(m[3],10)/Math.pow(10,m[3].length); }
+      stamps.push(mins*60+secs+frac);
+    }
+    if(!stamps.length) continue;
+    const body=raw.replace(LRC_TIME,'').trim();
+    for(const t of stamps) out.push({t,text:body});
+  }
+  if(!out.length) return null;
+  out.sort((a,b)=>a.t-b.t);
+  return out;
+}
+
+function lyricsCacheKey(t){
+  return 'lyr_'+hashStr([(t.artist||''),(t.title||displayTitle(t)),(t.album||'')].join('|').toLowerCase());
+}
+async function cachedLyrics(t){
+  if(!dbAvailable) return null;
+  try{ const m=await dbGetMeta(lyricsCacheKey(t)); return m&&('text' in m)?m:null; }catch(e){ return null; }
+}
+async function cacheLyrics(t,payload){
+  if(!dbAvailable) return;
+  try{ await dbSetMeta(lyricsCacheKey(t),payload); }catch(e){}
+}
+
+async function lrclibFetch(t){
+  const artist=(t.artist||'').replace(/^Unknown Artist$/,'').trim();
+  const title=(displayTitle(t)||'').trim();
+  if(!title) return null;
+  const album=(t.album||'').replace(/^Unknown Album$/,'').trim();
+
+  // Exact match first (best chance of correct synced lyrics)
+  const qs=new URLSearchParams({track_name:title});
+  if(artist) qs.set('artist_name',artist);
+  if(album) qs.set('album_name',album);
+  if(t.duration&&isFinite(t.duration)&&t.duration>0) qs.set('duration',Math.round(t.duration));
+  try{
+    const r=await fetch('https://lrclib.net/api/get?'+qs.toString());
+    if(r.ok){
+      const d=await r.json();
+      if(d && (d.syncedLyrics||d.plainLyrics)) return d;
+    }
+  }catch(e){ return null; }   // offline / blocked
+
+  // Fuzzy search fallback; prefer a result that has synced lyrics.
+  try{
+    const q=(artist?artist+' ':'')+title;
+    const r=await fetch('https://lrclib.net/api/search?q='+encodeURIComponent(q));
+    if(!r.ok) return null;
+    const arr=await r.json();
+    if(!Array.isArray(arr)||!arr.length) return null;
+    return arr.find(x=>x.syncedLyrics) || arr.find(x=>x.plainLyrics) || null;
+  }catch(e){ return null; }
+}
+
+// Resolve lyrics for a track: {synced:[{t,text}]|null, plain:string|null, source}
+async function getLyrics(t){
+  // 1. Embedded in the file — always available, even offline.
+  if(t.lyrics){
+    const synced=parseLRC(t.lyrics);
+    return {synced,plain:synced?null:t.lyrics,source:'embedded'};
+  }
+  // 2. Previously fetched and cached.
+  const c=await cachedLyrics(t);
+  if(c){
+    if(c.text===''){ return {synced:null,plain:null,source:'none'}; }  // known-missing
+    const synced=c.sync?parseLRC(c.text):null;
+    return {synced,plain:synced?null:c.text,source:'cache'};
+  }
+  // 3. Network.
+  if(!navigator.onLine) return {synced:null,plain:null,source:'offline'};
+  const d=await lrclibFetch(t);
+  if(!d || (!d.syncedLyrics && !d.plainLyrics)){
+    await cacheLyrics(t,{text:'',sync:false});   // remember the miss
+    return {synced:null,plain:null,source:'none'};
+  }
+  const text=d.syncedLyrics||d.plainLyrics;
+  const sync=!!d.syncedLyrics;
+  await cacheLyrics(t,{text,sync});
+  const synced=sync?parseLRC(text):null;
+  return {synced,plain:synced?null:text,source:'lrclib'};
+}
 
 /* ============================================================
    Downloads — keep a copy on this device so playback works with
@@ -1551,6 +1703,7 @@ function loadTrack(id,autoplay){
   audio.volume=state.volume;
   updateNowPlayingUI(t);
   setMediaSession(t);
+  if(lyr.open) loadLyricsForCurrent(true);   // new track -> refresh lyrics
   if(autoplay){
     audio.play().then(()=>{state.playing=true;syncPlayUI();}).catch(()=>{state.playing=false;syncPlayUI();});
   }else{
@@ -1625,6 +1778,7 @@ function onTime(){
     $('#npElapsed').textContent=fmtTime(c);
     $('#npRemain').textContent='-'+fmtTime(d-c);
   }
+  syncLyrics(false);
   const now=Date.now();
   if(now-saveThrottle>4000){ saveThrottle=now; saveLastState(); }
 }
@@ -1656,6 +1810,93 @@ function syncPlayUI(){
   if('mediaSession' in navigator){
     try{ navigator.mediaSession.playbackState=state.playing?'playing':'paused'; }catch(e){}
   }
+}
+
+/* ============================================================
+   Lyrics view — Apple-style line highlighting
+============================================================ */
+const lyr={open:false,synced:null,plain:null,forId:null,idx:-1,userScroll:0,loading:false};
+
+function setLyricsOpen(on){
+  lyr.open=on;
+  $('#npLyrics').classList.toggle('hidden',!on);
+  $('.np-art-wrap').classList.toggle('hidden',on);
+  $('#btnLyrics').classList.toggle('on',on);
+  $('#btnLyrics').setAttribute('aria-label',on?'Hide lyrics':'Show lyrics');
+  if(on) loadLyricsForCurrent();
+}
+
+function currentTrack(){ return state.qIndex>=0 ? trackById(state.queue[state.qIndex]) : null; }
+
+async function loadLyricsForCurrent(force){
+  const t=currentTrack();
+  const box=$('#lyrScroll');
+  if(!t){ box.innerHTML='<div class="lyr-msg">Nothing is playing.</div>'; return; }
+  if(!force && lyr.forId===t.id && (lyr.synced||lyr.plain)) return;   // already loaded
+
+  lyr.forId=t.id; lyr.synced=null; lyr.plain=null; lyr.idx=-1; lyr.loading=true;
+  box.innerHTML='<div class="lyr-msg"><div class="sp"></div>Looking for lyrics…</div>';
+
+  let res;
+  try{ res=await getLyrics(t); }
+  catch(e){ res={synced:null,plain:null,source:'none'}; }
+  lyr.loading=false;
+
+  // A different track may have started while we were fetching.
+  const now=currentTrack();
+  if(!now || now.id!==lyr.forId) return;
+
+  lyr.synced=res.synced; lyr.plain=res.plain;
+
+  if(res.synced){
+    box.innerHTML='';
+    const frag=document.createDocumentFragment();
+    res.synced.forEach((ln,i)=>{
+      const d=el('div','lyr-line'+(ln.text?'':' blank'));
+      d.textContent=ln.text||'';
+      d.dataset.i=i;
+      d.onclick=()=>{ try{ audio.currentTime=ln.t; if(audio.paused) audio.play().catch(()=>{}); }catch(e){} };
+      frag.appendChild(d);
+    });
+    box.appendChild(frag);
+    const src=el('div','lyr-src'); src.textContent=res.source==='embedded'?'Lyrics from file':'Lyrics from LRCLIB';
+    box.appendChild(src);
+    lyr.idx=-1;
+    syncLyrics(true);
+  }else if(res.plain){
+    box.innerHTML='';
+    const p=el('div','lyr-plain'); p.textContent=res.plain; box.appendChild(p);
+    const src=el('div','lyr-src'); src.textContent=res.source==='embedded'?'Lyrics from file':'Lyrics from LRCLIB (not time-synced)';
+    box.appendChild(src);
+  }else if(res.source==='offline'){
+    box.innerHTML='<div class="lyr-msg">You’re offline, so lyrics can’t be looked up.<br>They’ll load next time you have a connection.</div>';
+  }else{
+    box.innerHTML='<div class="lyr-msg">No lyrics found for this track.<br>Cleaner song titles and artist tags help the search.</div>';
+  }
+}
+
+// Highlight the line for the current playback position and keep it centred.
+function syncLyrics(force){
+  if(!lyr.open || !lyr.synced || !lyr.synced.length) return;
+  const now=audio.currentTime||0;
+  let i=lyr.synced.length-1;
+  while(i>=0 && lyr.synced[i].t>now+0.02) i--;
+  if(i===lyr.idx && !force) return;
+  lyr.idx=i;
+  const box=$('#lyrScroll');
+  const lines=box.querySelectorAll('.lyr-line');
+  lines.forEach((elm,k)=>{
+    elm.classList.toggle('active',k===i);
+    elm.classList.toggle('done',k<i);
+  });
+  if(i<0) return;
+  // Don't fight the user for ~4s after they scroll manually.
+  if(Date.now()-lyr.userScroll<4000) return;
+  const active=lines[i];
+  if(!active) return;
+  const target=active.offsetTop-(box.clientHeight*0.38);
+  const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  box.scrollTo({top:Math.max(0,target),behavior:(force||reduce)?'auto':'smooth'});
 }
 
 /* ============================================================
@@ -1793,6 +2034,11 @@ function wireEvents(){
   $('#miniArt').onclick=openNP;
   $('#miniPlay').onclick=e=>{ e.stopPropagation(); togglePlay(); };
   $('#miniNext').onclick=e=>{ e.stopPropagation(); next(false); };
+
+  // lyrics
+  $('#btnLyrics').onclick=()=>setLyricsOpen(!lyr.open);
+  $('#lyrScroll').addEventListener('scroll',()=>{ lyr.userScroll=Date.now(); },{passive:true});
+  $('#scrub').addEventListener('change',()=>syncLyrics(true));
 
   // now playing transport
   $('#btnPlay').onclick=togglePlay;
