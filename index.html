@@ -630,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 20';
+const BUILD='build 21';
 
 /* ============================================================
    Small helpers
@@ -2067,6 +2067,13 @@ let airplayMode=null;   // 'webkit' | 'remote' | null
    while the audio output is unchanged, so a slider bound to it would sit at a
    level that has nothing to do with what you hear. Sniff the platform first,
    then fall back to probing for browsers that reject the write outright. */
+/* True when the current source is a blob: URL held inside the browser — an
+   imported file, or a downloaded copy being preferred over the network. An
+   AirPlay receiver cannot fetch such a URL, so hand-off plays nothing. */
+function playingFromDevice(){
+  return typeof audio.src==='string' && audio.src.startsWith('blob:');
+}
+
 function isIOS(){
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
          // iPadOS 13+ reports itself as a Mac; touch points give it away.
@@ -2097,7 +2104,18 @@ function setupAirplay(){
       btn.classList.toggle('routing',on);
       btn.setAttribute('aria-label',on?'AirPlay — connected':'AirPlay');
     });
-    btn.onclick=()=>{ try{ audio.webkitShowPlaybackTargetPicker(); }catch(e){ showToast('AirPlay is unavailable right now.'); } };
+    btn.onclick=()=>{
+      try{ audio.webkitShowPlaybackTargetPicker(); }
+      catch(e){ showToast('AirPlay is unavailable right now.'); return; }
+      // A track playing from on-device storage has no address the receiver can
+      // fetch, so AirPlay hand-off silently plays nothing. Say so, and point at
+      // the routing that does work.
+      if(playingFromDevice()){
+        setTimeout(()=>showToast(
+          'This song is stored on your device, so AirPlay can’t fetch it. '+
+          'Route it from Control Centre → AirPlay instead, which sends all audio.'),400);
+      }
+    };
     return;
   }
 
