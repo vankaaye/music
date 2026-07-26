@@ -299,6 +299,44 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .sheet-cancel:active{background:rgba(255,255,255,.06)}
 @media (prefers-reduced-motion:reduce){.sheet-card{animation:none}}
 
+/* download buttons */
+.dl-btn{width:34px;height:34px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:50%}
+.dl-btn:active{background:rgba(255,255,255,.08)}
+.dl-btn svg{width:22px;height:22px}
+.dl-btn .circ{fill:none;stroke:var(--accent);stroke-width:1.6}
+.dl-btn .arw{fill:var(--accent)}
+.dl-done .chk{fill:var(--text-2)}
+.dl-ring{
+  width:22px;height:22px;border-radius:50%;position:relative;
+  background:conic-gradient(var(--accent) calc(var(--pct,0)*1%), rgba(255,255,255,.18) 0);
+  display:flex;align-items:center;justify-content:center;
+}
+.dl-ring::after{content:"";position:absolute;inset:2.5px;border-radius:50%;background:#000}
+.dl-ring .stop{position:relative;z-index:1;width:7px;height:7px;background:var(--accent);border-radius:1.5px}
+
+/* download-all button on album/artist pages */
+.dl-all{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;max-width:440px;margin:0 auto 4px;height:44px;border-radius:11px;background:var(--panel-2);color:var(--accent);font-size:16px;font-weight:600}
+.dl-all svg{width:20px;height:20px;fill:none;stroke:var(--accent);stroke-width:1.7}
+.dl-all:active{background:#3a3a3c}
+.dl-all.done{color:var(--text-2)}
+.dl-all.done svg{stroke:var(--text-2)}
+
+/* toast */
+#toast{
+  position:absolute;left:16px;right:16px;bottom:calc(var(--mini-h) + var(--sab) + 20px);z-index:80;
+  background:rgba(58,58,60,.97);color:#fff;border-radius:12px;padding:12px 14px;font-size:14px;line-height:1.35;
+  text-align:center;opacity:0;transform:translateY(10px);transition:opacity .2s ease,transform .2s ease;pointer-events:none;
+}
+#toast.show{opacity:1;transform:none}
+
+/* offline banner */
+#offlineBar{
+  display:flex;align-items:center;gap:8px;
+  margin:8px calc(16px + var(--sar)) 2px calc(16px + var(--sal));
+  background:#2c2c2e;border-radius:10px;padding:9px 12px;font-size:13px;color:var(--text-2);
+}
+#offlineBar b{color:var(--text);font-weight:600}
+
 /* server connection modal */
 #serverModal{position:absolute;inset:0;z-index:66;display:flex;align-items:center;justify-content:center;padding:20px}
 .modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6)}
@@ -1001,6 +1039,113 @@ async function syncRemote(opts){
 function serverHost(){ try{ return new URL(serverCfg.base).host; }catch(e){ return serverCfg?serverCfg.base:''; } }
 
 /* ============================================================
+   Downloads — keep a copy on this device so playback works with
+   no connection and uses no mobile data.
+============================================================ */
+const downloads=new Map();   // trackId -> {pct, abort}
+function isDownloaded(t){ return !!(t && t.audio); }
+function isDownloading(id){ return downloads.has(id); }
+
+async function downloadTrack(t){
+  if(!t || !t.remote || isDownloaded(t) || isDownloading(t.id)) return false;
+  const ctrl=new AbortController();
+  downloads.set(t.id,{pct:0,abort:ctrl});
+  render();
+  try{
+    const headers={};
+    const auth=authHeader(serverCfg);
+    if(auth) headers['Authorization']=auth;
+    const res=await fetch(t.url,{headers,signal:ctrl.signal});
+    if(!res.ok) throw new Error('HTTP '+res.status);
+
+    // Stream so we can show real progress on large files.
+    const total=parseInt(res.headers.get('Content-Length')||'0',10)||t.size||0;
+    let blob;
+    if(res.body && res.body.getReader){
+      const reader=res.body.getReader();
+      const chunks=[]; let got=0;
+      for(;;){
+        const {done,value}=await reader.read();
+        if(done) break;
+        chunks.push(value); got+=value.length;
+        const d=downloads.get(t.id);
+        if(d && total){ const pct=Math.min(99,Math.round(got/total*100)); if(pct!==d.pct){ d.pct=pct; paintDownloadUI(t.id,pct); } }
+      }
+      blob=new Blob(chunks,{type:res.headers.get('Content-Type')||'audio/mpeg'});
+    }else{
+      blob=await res.blob();
+    }
+
+    // Ask for persistent storage the first time we keep audio on-device.
+    if(!persistRequested && dbAvailable && navigator.storage && navigator.storage.persist){
+      persistRequested=true;
+      try{ await navigator.storage.persist(); }catch(e){}
+    }
+
+    t.audio=blob;
+    if(!t.size) t.size=blob.size;
+    if(!t.duration||!isFinite(t.duration)){
+      try{ t.duration=await readDuration(blob); }catch(e){}
+    }
+    if(dbAvailable){ await dbPutTrack(t); }
+    downloads.delete(t.id);
+    render();
+    return true;
+  }catch(e){
+    downloads.delete(t.id);
+    render();
+    if(e.name!=='AbortError'){
+      showToast(/quota|QuotaExceeded/i.test(e.name+e.message)
+        ? 'Not enough space on this device to download that track.'
+        : 'Download failed: '+e.message);
+    }
+    return false;
+  }
+}
+
+function cancelDownload(id){
+  const d=downloads.get(id);
+  if(d){ try{ d.abort.abort(); }catch(e){} downloads.delete(id); render(); }
+}
+
+// Remove the on-device copy but keep the track (it can still stream).
+async function removeDownload(t){
+  if(!t||!t.remote||!t.audio) return;
+  t.audio=null;
+  if(dbAvailable){ try{ await dbPutTrack(t); }catch(e){} }
+  // If it is playing right now, switch the source to streaming.
+  if(state.qIndex>=0 && state.queue[state.qIndex]===t.id){
+    const pos=audio.currentTime, wasPlaying=!audio.paused;
+    audio.src=t.url;
+    audio.addEventListener('loadedmetadata',function once(){ try{audio.currentTime=pos;}catch(e){} audio.removeEventListener('loadedmetadata',once); if(wasPlaying)audio.play().catch(()=>{}); });
+  }
+  render();
+}
+
+// Download every not-yet-downloaded track in a list, one at a time.
+async function downloadList(list){
+  const pending=list.filter(t=>t.remote && !isDownloaded(t) && !isDownloading(t.id));
+  for(const t of pending){ await downloadTrack(t); }
+}
+
+// Update just the affected buttons mid-download (cheaper than a full render).
+function paintDownloadUI(id,pct){
+  $$('[data-dl="'+id+'"]').forEach(elm=>{
+    const ring=elm.querySelector('.dl-ring');
+    if(ring) ring.style.setProperty('--pct',pct);
+  });
+}
+
+let toastTimer=null;
+function showToast(msg){
+  let el2=$('#toast');
+  if(!el2){ el2=document.createElement('div'); el2.id='toast'; document.getElementById('app').appendChild(el2); }
+  el2.textContent=msg; el2.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>el2.classList.remove('show'),3600);
+}
+
+/* ============================================================
    Grouping helpers
 ============================================================ */
 function filtered(){
@@ -1039,6 +1184,14 @@ function render(){
 
   content.innerHTML='';
 
+  // Offline: say plainly what is still playable.
+  if(!navigator.onLine){
+    const ready=state.tracks.filter(t=>t.audio).length;
+    const off=el('div'); off.id='offlineBar';
+    off.innerHTML='<b>Offline</b> · '+ready+' downloaded track'+(ready!==1?'s':'')+' ready to play';
+    content.appendChild(off);
+  }
+
   if(serverCfg) content.appendChild(cloudBar());
 
   if(state.tracks.length===0){
@@ -1054,7 +1207,11 @@ function render(){
 
   // stats footer
   const stats=el('div','lib-stats');
-  stats.textContent=`${state.tracks.length} song${state.tracks.length!==1?'s':''} · ${fmtMB(libBytes())}`;
+  const onDevice=state.tracks.filter(t=>t.audio).length;
+  const streamOnly=state.tracks.length-onDevice;
+  let txt=`${state.tracks.length} song${state.tracks.length!==1?'s':''} · ${fmtMB(libBytes())} on this device`;
+  if(streamOnly>0) txt+=` · ${streamOnly} streaming`;
+  stats.textContent=txt;
   content.appendChild(stats);
   updateTabsUI();
 }
@@ -1108,6 +1265,33 @@ function renderEmpty(){
 // duration text: unknown remote durations show a dash until first played
 function durText(t){ return (t.duration&&isFinite(t.duration)) ? fmtTime(t.duration) : '–'; }
 
+/* Apple-style per-track download control.
+   Not downloaded -> circled down-arrow. Downloading -> progress ring (tap to
+   cancel). Downloaded -> muted check (tap to free the space). */
+function downloadBtn(t){
+  if(!t.remote) return null;   // local files are already on the device
+  const btn=el('button','dl-btn');
+  btn.setAttribute('data-dl',t.id);
+  if(isDownloading(t.id)){
+    const d=downloads.get(t.id);
+    btn.setAttribute('aria-label','Cancel download');
+    const ring=el('div','dl-ring'); ring.style.setProperty('--pct',d.pct||0);
+    const stop=el('div','stop'); ring.appendChild(stop);
+    btn.appendChild(ring);
+    btn.onclick=e=>{ e.stopPropagation(); cancelDownload(t.id); };
+  }else if(isDownloaded(t)){
+    btn.className='dl-btn dl-done';
+    btn.setAttribute('aria-label','Downloaded — tap to remove from this device');
+    btn.innerHTML='<svg viewBox="0 0 24 24"><path class="chk" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1.2 14.3l-4-4 1.4-1.4 2.6 2.6 5.6-5.6L17.8 9l-7 7.3z"/></svg>';
+    btn.onclick=async e=>{ e.stopPropagation(); await removeDownload(t); showToast('Removed download. Still available from your server.'); };
+  }else{
+    btn.setAttribute('aria-label','Download');
+    btn.innerHTML='<svg viewBox="0 0 24 24"><circle class="circ" cx="12" cy="12" r="9.2"/><path class="arw" d="M12.75 6.5h-1.5v6.1L8.9 10.25l-1.06 1.06L12 15.5l4.16-4.19-1.06-1.06-2.35 2.35V6.5z"/></svg>';
+    btn.onclick=e=>{ e.stopPropagation(); downloadTrack(t); };
+  }
+  return btn;
+}
+
 function songRow(t){
   const row=el('div','song');
   if(state.qIndex>=0 && state.queue[state.qIndex]===t.id) row.classList.add('playing');
@@ -1128,6 +1312,7 @@ function songRow(t){
   }else{
     const dur=el('div','dur'); dur.textContent=durText(t);
     row.appendChild(dur);
+    const dl=downloadBtn(t); if(dl) row.appendChild(dl);
   }
   row.onclick=()=>{ if(state.editMode)return; playFromList(currentSongContext(),t.id); };
   return row;
@@ -1228,6 +1413,7 @@ function trackRow(t,num,type){
     row.appendChild(del);
   }else{
     const d=el('div','tdur'); d.textContent=durText(t); row.appendChild(d);
+    const dl=downloadBtn(t); if(dl) row.appendChild(dl);
   }
   row.onclick=()=>{ if(state.editMode)return; playFromList(_lastContextList,t.id); };
   return row;
@@ -1269,6 +1455,24 @@ function renderDrill(){
   actions.appendChild(playBtn); actions.appendChild(shufBtn);
   head.appendChild(actions);
   content.appendChild(head);
+
+  // Download all (only when this group has streamable tracks)
+  const remoteOnes=sorted.filter(t=>t.remote);
+  if(remoteOnes.length){
+    const pending=remoteOnes.filter(t=>!isDownloaded(t));
+    const busy=remoteOnes.some(t=>isDownloading(t.id));
+    const dlAll=el('button','dl-all');
+    if(!pending.length){
+      dlAll.className='dl-all done';
+      dlAll.innerHTML='<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Downloaded';
+      dlAll.onclick=null;
+    }else{
+      dlAll.innerHTML='<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><path d="M12 7.2v8.2M8.4 11.6L12 15.4l3.6-3.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        + (busy ? 'Downloading…' : 'Download '+pending.length+' track'+(pending.length!==1?'s':''));
+      dlAll.onclick=()=>downloadList(sorted);
+    }
+    content.appendChild(dlAll);
+  }
 
   // track list
   const list=el('div','tracklist');
@@ -1334,12 +1538,13 @@ function loadTrack(id,autoplay){
   const t=trackById(id);
   if(!t)return;
   if(currentAudioUrl){ URL.revokeObjectURL(currentAudioUrl); currentAudioUrl=null; }
-  if(t.remote){
-    // Streamed from the WebDAV server; the service worker injects auth + Range passes through.
-    audio.src=t.url;
-  }else if(t.audio){
+  // Prefer an on-device copy: works offline and uses no data.
+  if(t.audio){
     currentAudioUrl=URL.createObjectURL(t.audio);
     audio.src=currentAudioUrl;
+  }else if(t.remote){
+    // Streamed from the server; the service worker injects auth, Range passes through.
+    audio.src=t.url;
   }else{
     return; // no playable source
   }
@@ -1528,11 +1733,11 @@ async function restoreLastState(){
     state.qIndex=state.queue.indexOf(s.trackId);
     const t=trackById(s.trackId);
     if(currentAudioUrl){URL.revokeObjectURL(currentAudioUrl);currentAudioUrl=null;}
-    if(t.remote){
-      audio.src=t.url;
-    }else if(t.audio){
+    if(t.audio){
       currentAudioUrl=URL.createObjectURL(t.audio);
       audio.src=currentAudioUrl;
+    }else if(t.remote){
+      audio.src=t.url;
     }else{
       return; // nothing playable to restore
     }
@@ -1647,6 +1852,10 @@ function wireEvents(){
     else if(e.code==='ArrowLeft') prev();
     else if(e.code==='Escape' && state.npOpen) closeNP();
   });
+
+  // reflect connectivity changes (offline banner / streaming availability)
+  window.addEventListener('online',()=>render());
+  window.addEventListener('offline',()=>render());
 
   // drag & drop anywhere
   let dragDepth=0;

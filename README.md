@@ -31,6 +31,14 @@ device.
   Disconnect removes the server's tracks from the device. Credentials are
   stored only on that device, and a service worker attaches them to media
   requests so seeking works.
+- **Downloads / offline** — every streamable track has an Apple-style download
+  button (circled arrow → live progress ring → filled check). Downloaded audio
+  is stored on the device, so it plays with no connection and uses no mobile
+  data; playback always prefers the local copy over the network. Album and
+  artist pages have a **Download** action for the whole group, the library
+  footer reports what is on-device versus streaming, and going offline shows
+  how many tracks are ready. Tap the check to free the space again — the track
+  stays in the library and can be re-downloaded or streamed.
 - **Desktop** — drop audio files anywhere on the page to add them; space /
   arrow keys control playback.
 
