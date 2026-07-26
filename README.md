@@ -7,7 +7,10 @@ device.
 
 ## Features
 
-- **Library** — add your own audio files (multi-select). Hand-written ID3v2
+- **Library** — add individual files or a whole folder; picking a folder pulls
+  in every subfolder too. Files are matched on their path, so two albums may
+  each contain a track of the same name, and untagged files fall back to their
+  containing folder as the album. Hand-written ID3v2
   tag parser (v2.2 / v2.3 / v2.4) reads title, artist, album and embedded
   cover art, with a `Artist - Title` filename fallback. Browse by Songs,
   Albums (artwork grid) or Artists, drill into a group, and search across

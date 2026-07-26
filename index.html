@@ -629,7 +629,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 15';
+const BUILD='build 16';
 
 /* ============================================================
    Small helpers
@@ -936,8 +936,22 @@ async function doConnectServer(){
   else{ await clearServerCfg(); showServerError(res.error||'Could not connect.'); }
 }
 
+// Where a file sits inside the chosen folder. Picking a folder recurses into
+// subfolders, so two albums can hold the same filename — the path keeps them
+// distinct, which the bare filename could not.
+function filePath(f){ return f.webkitRelativePath || f.name; }
+
+// Name of the folder immediately containing the file, if it came from a
+// folder pick. Returns null for a plain file selection.
+function folderAlbum(rel){
+  const parts=String(rel||'').split('/');
+  if(parts.length<2) return null;
+  const dir=parts[parts.length-2].trim();
+  return dir || null;
+}
+
 async function importFiles(fileList){
-  const files=Array.from(fileList).filter(f=>/^audio\//.test(f.type)||/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus)$/i.test(f.name));
+  const files=Array.from(fileList).filter(f=>/^audio\//.test(f.type)||AUDIO_RE.test(f.name));
   if(!files.length) return;
 
   // request persistent storage on first import
@@ -948,28 +962,39 @@ async function importFiles(fileList){
 
   const overlay=$('#importOverlay');
   overlay.classList.remove('hidden');
-  const existing=new Set(state.tracks.map(t=>t.name+'|'+t.size));
+  // Duplicate detection keys on the full path, so two albums may each hold a
+  // file of the same name. Files picked individually carry no path, so those
+  // are additionally matched on their bare name — otherwise picking a file and
+  // later picking its folder would import it twice.
+  const existing=new Set(state.tracks.map(t=>(t.path||t.name)+'|'+t.size));
+  const flatNames=new Set(state.tracks.filter(t=>!t.path||t.path===t.name)
+                                      .map(t=>t.name+'|'+t.size));
   let added=0, skipped=0;
 
   for(let i=0;i<files.length;i++){
     const f=files[i];
+    const rel=filePath(f);
     $('#importTxt').textContent=`Importing ${i+1} of ${files.length}`;
-    $('#importSub').textContent=f.name;
-    const key=f.name+'|'+f.size;
-    if(existing.has(key)){ skipped++; continue; }
+    $('#importSub').textContent=rel;
+    const key=rel+'|'+f.size;
+    const nameKey=f.name+'|'+f.size;
+    if(existing.has(key) || flatNames.has(nameKey)){ skipped++; continue; }
     existing.add(key);
+    if(rel===f.name) flatNames.add(nameKey);
 
     let tags={title:null,artist:null,album:null,cover:null};
     try{ tags=await parseID3(f); }catch(e){}
 
     const {title,artist}=deriveTitleArtist(tags,f.name);
-    const album=tags.album||'Unknown Album';
+    // Untagged files usually still live in a per-album folder, so fall back to
+    // the containing folder's name before giving up on "Unknown Album".
+    const album=tags.album||folderAlbum(rel)||'Unknown Album';
 
     const duration=await readDuration(f);
 
     const rec={
       id:'t_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8),
-      name:f.name, size:f.size,
+      name:f.name, path:rel, size:f.size,
       title, artist, album, duration,
       cover:tags.cover||null,
       lyrics:tags.lyrics||null,   // embedded USLT, if the file has any
