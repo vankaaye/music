@@ -604,6 +604,8 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 <script>
 "use strict";
 (function(){
+// Shown in the library footer so you can confirm which build is running.
+const BUILD='build 12';
 
 /* ============================================================
    Small helpers
@@ -1395,6 +1397,7 @@ function render(){
   const streamOnly=state.tracks.length-onDevice;
   let txt=`${state.tracks.length} song${state.tracks.length!==1?'s':''} · ${fmtMB(libBytes())} on this device`;
   if(streamOnly>0) txt+=` · ${streamOnly} streaming`;
+  txt+=' · '+BUILD;
   stats.textContent=txt;
   content.appendChild(stats);
   updateTabsUI();
@@ -1912,7 +1915,7 @@ async function loadLyricsForCurrent(force){
   if(!force && lyr.forId===t.id && (lyr.synced||lyr.plain)) return;   // already loaded
 
   lyr.forId=t.id; lyr.synced=null; lyr.plain=null; lyr.idx=-1; lyr.loading=true;
-  box.innerHTML='<div class="lyr-msg"><div class="sp"></div>Looking for lyrics…</div>';
+  box.innerHTML='<div class="lyr-msg lyr-loading"><div class="sp"></div>Looking for lyrics…</div>';
 
   let res;
   try{ res=await getLyrics(t); }
@@ -2233,7 +2236,29 @@ async function boot(){
   // register service worker (only over http/https)
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
     try{
-      await navigator.serviceWorker.register('sw.js');
+      // updateViaCache:'none' stops the browser serving a stale sw.js itself.
+      const reg=await navigator.serviceWorker.register('sw.js',{updateViaCache:'none'});
+
+      // Reload only when a *new* worker replaces an existing one — that means a
+      // new build arrived. On a first install the page is already current, so
+      // reloading would be a pointless flash.
+      let hadController=!!navigator.serviceWorker.controller;
+      let reloading=false;
+      navigator.serviceWorker.addEventListener('controllerchange',()=>{
+        if(!hadController){ hadController=true; return; }   // first install
+        if(reloading) return;
+        reloading=true;
+        location.reload();
+      });
+
+      // Look for a new version on launch and whenever the app is re-opened —
+      // installed apps are rarely "reloaded", so we have to ask.
+      const check=()=>{ try{ reg.update(); }catch(e){} };
+      check();
+      document.addEventListener('visibilitychange',()=>{ if(!document.hidden) check(); });
+      window.addEventListener('online',check);
+      setInterval(check,30*60*1000);
+
       // Once the worker controls the page, give it the server credentials so it
       // can authorize media streaming requests.
       await navigator.serviceWorker.ready;

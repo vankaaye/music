@@ -3,7 +3,7 @@
    - Locally imported audio lives in IndexedDB, so it is never cached here.
    - For a connected WebDAV/TrueNAS server, attaches Basic auth to media
      requests so <audio> can stream (and seek via Range) from the server. */
-const CACHE = 'music-shell-v2';
+const CACHE = 'music-shell-v3';
 const SHELL = [
   './',
   './index.html',
@@ -79,22 +79,40 @@ self.addEventListener('fetch', event => {
     return; // other cross-origin requests pass through untouched
   }
 
-  // App-shell: cache-first, fall back to network, then to cached index for navigations.
+  const isHTML = req.mode === 'navigate' ||
+                 url.pathname.endsWith('/') ||
+                 url.pathname.endsWith('/index.html');
+
+  if (isHTML) {
+    // Network-first: an installed app must never be stuck on an old build.
+    // Falls back to the cached shell when offline.
+    event.respondWith(
+      fetch(req, { cache: 'no-store' })
+        .then(res => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then(c => c.put('./index.html', copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match('./index.html').then(c => c || caches.match('./')))
+    );
+    return;
+  }
+
+  // Other shell assets: serve fast from cache, refresh in the background.
   event.respondWith(
     caches.match(req).then(cached => {
-      if (cached) return cached;
-      return fetch(req)
+      const network = fetch(req)
         .then(res => {
-          // Runtime-cache same-origin shell files we may have missed.
           if (res && res.ok && res.type === 'basic') {
             const copy = res.clone();
             caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
           }
           return res;
         })
-        .catch(() => {
-          if (req.mode === 'navigate') return caches.match('./index.html');
-        });
+        .catch(() => cached);
+      return cached || network;
     })
   );
 });
