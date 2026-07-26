@@ -44,6 +44,9 @@ device.
 
 ### Connecting a server
 
+> Using Nextcloud? See **[SETUP-NEXTCLOUD.md](SETUP-NEXTCLOUD.md)** for
+> step-by-step instructions, including the CORS configuration.
+
 **+ → Connect Server…**, then enter the WebDAV URL (e.g.
 `https://nas.example.com/webdav`), an optional subfolder, and credentials.
 
