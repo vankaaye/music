@@ -60,9 +60,10 @@ device.
   **Songs stored on the device cannot be sent over AirPlay**: hand-off gives the
   receiver a URL to fetch, and an imported or downloaded file only exists inside
   the browser, so the receiver has nothing to play. The app says so when you try.
-  Tracks streamed from a library link have a real address and can hand off; to
-  send on-device audio, use iOS Control Centre → AirPlay, which routes all
-  system audio regardless of source.
+  Tracks streamed from a library link have a real address and can hand off. To
+  send on-device audio, use **Control Centre → Screen Mirroring**, which carries
+  the device's own output; the AirPlay control in the Now Playing card uses the
+  same hand-off mechanism and fails the same way.
 - **Lyrics** — a lyrics button in Now Playing shows time-synced lyrics with the
   current line highlighted and auto-scrolled, Apple Music style; tap any line to
   jump to it. Lyrics come from the file's own embedded ID3 tags first, then from

@@ -630,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 21';
+const BUILD='build 22';
 
 /* ============================================================
    Small helpers
@@ -2112,8 +2112,9 @@ function setupAirplay(){
       // the routing that does work.
       if(playingFromDevice()){
         setTimeout(()=>showToast(
-          'This song is stored on your device, so AirPlay can’t fetch it. '+
-          'Route it from Control Centre → AirPlay instead, which sends all audio.'),400);
+          'This song is stored on your device, so AirPlay has no address to fetch. '+
+          'Use Control Centre → Screen Mirroring to send the audio, or connect a '+
+          'library link so tracks stream from a real URL.'),400);
       }
     };
     return;
