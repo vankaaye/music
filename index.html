@@ -630,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 22';
+const BUILD='build 23';
 
 /* ============================================================
    Small helpers
@@ -2074,6 +2074,25 @@ function playingFromDevice(){
   return typeof audio.src==='string' && audio.src.startsWith('blob:');
 }
 
+/* While AirPlay is active, a track that has a real URL must be played from that
+   URL: the receiver fetches the media itself and cannot read a blob: held in
+   the browser. Downloaded tracks keep their local copy for offline use and
+   simply stream while routed. */
+function preferStreamForAirplay(){
+  const t=currentTrack();
+  if(!t || !t.remote || !t.url) return;      // imported files have no URL to offer
+  if(!playingFromDevice()) return;           // already streaming
+  const pos=audio.currentTime, wasPlaying=!audio.paused;
+  if(currentAudioUrl){ URL.revokeObjectURL(currentAudioUrl); currentAudioUrl=null; }
+  audio.src=t.url;
+  const seek=()=>{
+    try{ audio.currentTime=pos; }catch(e){}
+    audio.removeEventListener('loadedmetadata',seek);
+    if(wasPlaying) audio.play().catch(()=>{});
+  };
+  audio.addEventListener('loadedmetadata',seek);
+}
+
 function isIOS(){
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
          // iPadOS 13+ reports itself as a Mac; touch points give it away.
@@ -2103,6 +2122,10 @@ function setupAirplay(){
       const on=!!audio.webkitCurrentPlaybackTargetIsWireless;
       btn.classList.toggle('routing',on);
       btn.setAttribute('aria-label',on?'AirPlay — connected':'AirPlay');
+      // A receiver fetches the media itself, so a downloaded copy (blob:) is
+      // useless to it. Swap to the track's real URL while routing, and back to
+      // the local copy afterwards.
+      if(on) preferStreamForAirplay();
     });
     btn.onclick=()=>{
       try{ audio.webkitShowPlaybackTargetPicker(); }
