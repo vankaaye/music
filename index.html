@@ -238,7 +238,12 @@ input{font-family:inherit}
   position:relative;z-index:1;flex:1;display:flex;flex-direction:column;
   padding:calc(var(--sat) + 8px) calc(24px + var(--sar)) calc(var(--sab) + 20px) calc(24px + var(--sal));
 }
-.np-grip{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,.4);margin:0 auto 8px;flex:none}
+.np-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex:none}
+.np-back,.np-head-sp{width:40px;height:40px;flex:none}
+.np-back{display:flex;align-items:center;justify-content:center;border-radius:50%;color:rgba(255,255,255,.9)}
+.np-back svg{width:26px;height:26px}
+.np-back:active{background:rgba(255,255,255,.14)}
+.np-grip{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,.4);margin:0 auto;flex:1;max-width:38px}
 .np-art-wrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:12px 0}
 #npArt{
   width:min(78vw,340px);aspect-ratio:1;border-radius:12px;background:var(--panel-2);
@@ -309,9 +314,16 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .repeat-one .one{position:absolute;font-size:9px;font-weight:800;color:var(--accent);top:50%;left:50%;transform:translate(-50%,-50%)}
 
 /* volume */
-.np-vol{display:flex;align-items:center;gap:10px;margin:14px 2px 0}
+.np-bottom{display:flex;align-items:center;gap:12px;margin:14px 2px 0;min-height:38px}
+.np-vol{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
 .np-vol svg{width:18px;height:18px;fill:rgba(255,255,255,.6);flex:none}
 #np.no-vol .np-vol{display:none}
+/* AirPlay / device routing */
+.ap-btn{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:10px;margin-left:auto}
+.ap-btn svg{width:23px;height:23px;fill:rgba(255,255,255,.85)}
+.ap-btn:active{background:rgba(255,255,255,.14)}
+.ap-btn.routing{background:var(--accent)}
+.ap-btn.routing svg{fill:#fff}
 
 /* add-source action sheet */
 #sheet{position:absolute;inset:0;z-index:65;display:flex;flex-direction:column;justify-content:flex-end}
@@ -479,7 +491,13 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
     <div class="bg" id="npBg"></div>
     <div class="scrim"></div>
     <div class="np-inner">
-      <div class="np-grip" id="npGrip"></div>
+      <div class="np-head">
+        <button id="npBack" class="np-back" aria-label="Close now playing">
+          <svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="np-grip" id="npGrip"></div>
+        <div class="np-head-sp"></div>
+      </div>
       <div class="np-art-wrap">
         <div id="npArt"><div class="ph"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div></div>
       </div>
@@ -513,10 +531,18 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
           <span class="one hidden" id="repeatOne">1</span>
         </button>
       </div>
-      <div class="np-vol">
-        <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 5V4L9 9H5z"/></svg>
-        <input type="range" class="bar" id="vol" min="0" max="100" value="100">
-        <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 5V4L9 9H5zm11.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+      <div class="np-bottom">
+        <div class="np-vol">
+          <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 5V4L9 9H5z"/></svg>
+          <input type="range" class="bar" id="vol" min="0" max="100" value="100">
+          <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 5V4L9 9H5zm11.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
+        </div>
+        <button id="btnAirplay" class="ap-btn hidden" aria-label="AirPlay">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 13.6L17.7 20.5H6.3L12 13.6z"/>
+            <path d="M4 3.5h16a2 2 0 0 1 2 2v8.6a2 2 0 0 1-2 2h-2.9l-1.4-1.9H20a.1.1 0 0 0 .1-.1V5.5a.1.1 0 0 0-.1-.1H4a.1.1 0 0 0-.1.1v8.6a.1.1 0 0 0 .1.1h4.3l-1.4 1.9H4a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2z"/>
+          </svg>
+        </button>
       </div>
     </div>
   </section>
@@ -808,6 +834,12 @@ const urlCache=new Map();     // trackId -> cover object URL
 let currentAudioUrl=null;
 const audio=new Audio();
 audio.preload='metadata';
+audio.setAttribute('playsinline','');
+// Safari only offers AirPlay routing for a media element that is in the
+// document, so keep it attached (hidden — the app draws its own controls).
+audio.style.display='none';
+document.addEventListener('DOMContentLoaded',()=>{ try{ document.body.appendChild(audio); }catch(e){} });
+if(document.body){ try{ document.body.appendChild(audio); }catch(e){} }
 
 function coverURL(t){
   if(!t||!t.cover) return null;
@@ -1813,6 +1845,51 @@ function syncPlayUI(){
 }
 
 /* ============================================================
+   AirPlay / device routing
+   Safari exposes Apple's own picker via webkitShowPlaybackTargetPicker.
+   Other browsers may support the Remote Playback API (e.g. Cast).
+============================================================ */
+let airplayMode=null;   // 'webkit' | 'remote' | null
+
+function setupAirplay(){
+  const btn=$('#btnAirplay');
+
+  if(typeof audio.webkitShowPlaybackTargetPicker==='function'){
+    airplayMode='webkit';
+    btn.classList.remove('hidden');           // iOS always has at least a local target
+    audio.addEventListener('webkitplaybacktargetavailabilitychanged',e=>{
+      btn.classList.toggle('hidden',e.availability==='not-available');
+    });
+    audio.addEventListener('webkitcurrentplaybacktargetiswirelesschanged',()=>{
+      const on=!!audio.webkitCurrentPlaybackTargetIsWireless;
+      btn.classList.toggle('routing',on);
+      btn.setAttribute('aria-label',on?'AirPlay — connected':'AirPlay');
+    });
+    btn.onclick=()=>{ try{ audio.webkitShowPlaybackTargetPicker(); }catch(e){ showToast('AirPlay is unavailable right now.'); } };
+    return;
+  }
+
+  if(audio.remote && typeof audio.remote.prompt==='function'){
+    airplayMode='remote';
+    audio.disableRemotePlayback=false;
+    // Only surface the button when a receiver actually exists.
+    if(typeof audio.remote.watchAvailability==='function'){
+      audio.remote.watchAvailability(available=>{
+        btn.classList.toggle('hidden',!available);
+      }).catch(()=>{ btn.classList.add('hidden'); });
+    }else{
+      btn.classList.remove('hidden');
+    }
+    audio.remote.addEventListener&&audio.remote.addEventListener('connect',()=>btn.classList.add('routing'));
+    audio.remote.addEventListener&&audio.remote.addEventListener('disconnect',()=>btn.classList.remove('routing'));
+    btn.onclick=()=>{ audio.remote.prompt().catch(()=>{}); };
+    return;
+  }
+
+  btn.classList.add('hidden');   // no routing support in this browser
+}
+
+/* ============================================================
    Lyrics view — Apple-style line highlighting
 ============================================================ */
 const lyr={open:false,synced:null,plain:null,forId:null,idx:-1,userScroll:0,loading:false};
@@ -2035,6 +2112,9 @@ function wireEvents(){
   $('#miniPlay').onclick=e=>{ e.stopPropagation(); togglePlay(); };
   $('#miniNext').onclick=e=>{ e.stopPropagation(); next(false); };
 
+  // close the now playing sheet
+  $('#npBack').onclick=closeNP;
+
   // lyrics
   $('#btnLyrics').onclick=()=>setLyricsOpen(!lyr.open);
   $('#lyrScroll').addEventListener('scroll',()=>{ lyr.userScroll=Date.now(); },{passive:true});
@@ -2131,6 +2211,8 @@ async function boot(){
   syncPlayUI();
   $('#miniPlay').innerHTML=PLAY_SVG;
   $('#btnPlay').innerHTML=PLAY_SVG;
+
+  setupAirplay();
 
   // iOS/iPadOS block programmatic audio volume (it's hardware-only there).
   // Feature-detect and hide the volume slider where it can have no effect.

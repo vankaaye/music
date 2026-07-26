@@ -39,6 +39,10 @@ device.
   footer reports what is on-device versus streaming, and going offline shows
   how many tracks are ready. Tap the check to free the space again — the track
   stays in the library and can be re-downloaded or streamed.
+- **AirPlay / device output** — in Safari the Now Playing view offers Apple's
+  own AirPlay picker, with the button lit while audio is routed to a device.
+  Other browsers get the Remote Playback picker (e.g. Cast) when a receiver is
+  available; the button hides where neither is supported.
 - **Lyrics** — a lyrics button in Now Playing shows time-synced lyrics with the
   current line highlighted and auto-scrolled, Apple Music style; tap any line to
   jump to it. Lyrics come from the file's own embedded ID3 tags first, then from
