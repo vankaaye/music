@@ -24,6 +24,12 @@ device.
   scales while playing, the blurred cover as the background, MediaSession
   integration for lock-screen / headphone / car controls, and it remembers and
   restores the last track and position (paused) on next launch.
+- **One library on every device** — connect a **Link** (a `library.json` or
+  `.m3u` listing your tracks, uploaded next to the audio on any static host) and
+  the same library appears everywhere you connect it. No server to run and
+  nothing to configure on hosts that already allow cross-origin reads. See
+  **[SETUP-LIBRARY.md](SETUP-LIBRARY.md)**; `tools/make-library.py` generates the
+  list file from a folder.
 - **Your own server (WebDAV / TrueNAS)** — connect a WebDAV share and the app
   lists it recursively, reads tags, and streams tracks on demand. Connect the
   same server from your phone, tablet and desktop to get the same library
@@ -52,7 +58,11 @@ device.
 - **Desktop** — drop audio files anywhere on the page to add them; space /
   arrow keys control playback.
 
-### Connecting a server
+### Connecting a library
+
+The quickest route is **+ → Connect Library → Link** — see
+**[SETUP-LIBRARY.md](SETUP-LIBRARY.md)**. The WebDAV route below is for when you
+need password-protected access to your own server.
 
 > Using Nextcloud? See **[SETUP-NEXTCLOUD.md](SETUP-NEXTCLOUD.md)** for
 > step-by-step instructions, including the CORS configuration.

@@ -392,6 +392,9 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .fld input{display:block;width:100%;height:44px;margin-top:6px;border:0;border-radius:10px;background:var(--panel-2);color:var(--text);font-size:16px;padding:0 12px;outline:none}
 .fld input:focus{box-shadow:0 0 0 2px var(--accent) inset}
 .modal-note{font-size:12px;color:#6a6a6f;margin:2px 0 12px;line-height:1.4}
+.modal-note b{color:var(--text-2);font-weight:600}
+.sv-seg{margin:0 0 14px}
+.sv-seg button{height:34px}
 .modal-err{font-size:13px;color:#ff6b6b;background:rgba(255,59,48,.12);border-radius:8px;padding:9px 11px;margin-bottom:12px;line-height:1.4}
 .modal-actions{display:flex;gap:10px}
 .m-btn{flex:1;height:46px;border-radius:11px;font-size:16px;font-weight:600}
@@ -577,21 +580,38 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
   <div id="serverModal" class="hidden" role="dialog" aria-label="Connect server">
     <div class="modal-backdrop" id="serverBackdrop"></div>
     <div class="modal-card">
-      <div class="modal-title">Connect Server</div>
-      <div class="modal-sub">Stream your library from a WebDAV / TrueNAS server so it’s the same on every device.</div>
-      <label class="fld">Server URL
-        <input id="svUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://nas.example.com/webdav">
-      </label>
-      <label class="fld">Folder <span class="opt">(optional)</span>
-        <input id="svPath" autocapitalize="off" autocorrect="off" placeholder="/Music">
-      </label>
-      <label class="fld">Username <span class="opt">(optional)</span>
-        <input id="svUser" autocapitalize="off" autocorrect="off" autocomplete="username" placeholder="">
-      </label>
-      <label class="fld">Password <span class="opt">(optional)</span>
-        <input id="svPass" type="password" autocomplete="current-password" placeholder="">
-      </label>
-      <div class="modal-note">Saved only on this device. Your server must allow this site via CORS.</div>
+      <div class="modal-title">Connect Library</div>
+      <div class="modal-sub">Point the app at your music online so the same library appears on every device.</div>
+
+      <div class="segmented sv-seg" id="svType">
+        <button data-type="link" class="active">Link</button>
+        <button data-type="webdav">WebDAV</button>
+      </div>
+
+      <!-- Link (manifest) mode -->
+      <div id="svLinkFields">
+        <label class="fld">Library link
+          <input id="svLink" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://…/library.json">
+        </label>
+        <div class="modal-note">A <b>.json</b> or <b>.m3u</b> file listing your tracks, uploaded next to the audio. Nothing to configure on the host — see the guide in the repo for one-command setup.</div>
+      </div>
+
+      <!-- WebDAV mode -->
+      <div id="svDavFields" class="hidden">
+        <label class="fld">Server URL
+          <input id="svUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://nas.example.com/webdav">
+        </label>
+        <label class="fld">Folder <span class="opt">(optional)</span>
+          <input id="svPath" autocapitalize="off" autocorrect="off" placeholder="/Music">
+        </label>
+        <label class="fld">Username <span class="opt">(optional)</span>
+          <input id="svUser" autocapitalize="off" autocorrect="off" autocomplete="username" placeholder="">
+        </label>
+        <label class="fld">Password <span class="opt">(optional)</span>
+          <input id="svPass" type="password" autocomplete="current-password" placeholder="">
+        </label>
+        <div class="modal-note">Saved only on this device. Your server must allow this site via CORS.</div>
+      </div>
       <div class="modal-err hidden" id="svErr"></div>
       <div class="modal-actions">
         <button id="svCancel" class="m-btn ghost">Cancel</button>
@@ -605,7 +625,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 12';
+const BUILD='build 13';
 
 /* ============================================================
    Small helpers
@@ -866,8 +886,15 @@ function closeAddSheet(){ $('#sheet').classList.add('hidden'); }
 
 function openServerModal(){
   if(serverCfg){
-    $('#svUrl').value=serverCfg.base||''; $('#svPath').value=serverCfg.path||'';
-    $('#svUser').value=serverCfg.user||''; $('#svPass').value=serverCfg.pass||'';
+    setServerType(serverCfg.type==='webdav'?'webdav':'link');
+    if(serverCfg.type==='webdav'){
+      $('#svUrl').value=serverCfg.base||''; $('#svPath').value=serverCfg.path||'';
+      $('#svUser').value=serverCfg.user||''; $('#svPass').value=serverCfg.pass||'';
+    }else{
+      $('#svLink').value=serverCfg.base||'';
+    }
+  }else{
+    setServerType('link');
   }
   $('#svErr').classList.add('hidden');
   $('#serverModal').classList.remove('hidden');
@@ -877,15 +904,26 @@ function showServerError(msg){
   const e=$('#svErr'); e.textContent=msg; e.classList.remove('hidden');
   $('#serverModal').classList.remove('hidden');
 }
+let svType='link';
+function setServerType(t){
+  svType=t;
+  $$('#svType button').forEach(b=>b.classList.toggle('active',b.dataset.type===t));
+  $('#svLinkFields').classList.toggle('hidden',t!=='link');
+  $('#svDavFields').classList.toggle('hidden',t!=='webdav');
+  $('#svErr').classList.add('hidden');
+}
 async function doConnectServer(){
-  const base=$('#svUrl').value.trim();
-  if(!base){ showServerError('Enter your server URL.'); return; }
-  if(!/^https?:\/\//i.test(base)){ showServerError('URL must start with http:// or https://'); return; }
+  const isLink=svType==='link';
+  const base=(isLink?$('#svLink'):$('#svUrl')).value.trim();
+  if(!base){ showServerError(isLink?'Paste the link to your library file.':'Enter your server URL.'); return; }
+  if(!/^https?:\/\//i.test(base)){ showServerError('The address must start with http:// or https://'); return; }
   if(location.protocol==='https:' && /^http:\/\//i.test(base)){
-    showServerError('This page is HTTPS, so the server must be HTTPS too — browsers block insecure requests from a secure page.');
+    showServerError('This page is HTTPS, so the address must be HTTPS too — browsers block insecure requests from a secure page.');
     return;
   }
-  const cfg={ base, path:$('#svPath').value.trim(), user:$('#svUser').value, pass:$('#svPass').value };
+  const cfg= isLink
+    ? { type:'link', base, path:'', user:'', pass:'' }
+    : { type:'webdav', base, path:$('#svPath').value.trim(), user:$('#svUser').value, pass:$('#svPass').value };
   const btn=$('#svConnect'); btn.disabled=true; btn.textContent='Connecting…';
   $('#svErr').classList.add('hidden');
   const res=await connectAndSync(cfg);
@@ -993,11 +1031,14 @@ function libBytes(){
    Remote source (WebDAV / TrueNAS) — stream your own library so it
    is identical on every device that connects to the same server.
 ============================================================ */
-let serverCfg=null;   // { base, path, user, pass }
+let serverCfg=null;   // { type:'link'|'webdav', base, path, user, pass }
 
 async function loadServerCfg(){
   if(!dbAvailable) return null;
-  try{ const m=await dbGetMeta('server'); serverCfg=m&&m.base?{base:m.base,path:m.path||'',user:m.user||'',pass:m.pass||''}:null; }
+  try{
+    const m=await dbGetMeta('server');
+    serverCfg=m&&m.base?{type:m.type||'webdav',base:m.base,path:m.path||'',user:m.user||'',pass:m.pass||''}:null;
+  }
   catch(e){ serverCfg=null; }
   return serverCfg;
 }
@@ -1066,6 +1107,73 @@ async function webdavList(cfg,onProgress){
   return out;
 }
 
+/* Manifest ("Link") source — the simplest way to host a shared library.
+   Point at a .json or .m3u file sitting next to the audio; relative paths are
+   resolved against it, so the manifest can just list filenames. Works with any
+   static host that serves the files publicly. */
+async function manifestList(cfg){
+  const url=cfg.base;
+  let res;
+  try{ res=await fetch(url,{cache:'no-store'}); }
+  catch(e){ throw new Error('Could not fetch that link. Check the address, that it uses https, and that the host allows other sites to read it (CORS).'); }
+  if(res.status===401||res.status===403) throw new Error('That link is not publicly readable (HTTP '+res.status+').');
+  if(res.status===404) throw new Error('Nothing found at that link (HTTP 404). Check the file name.');
+  if(!res.ok) throw new Error('The link returned HTTP '+res.status+'.');
+  const body=await res.text();
+
+  const abs=u=>{ try{ return new URL(u,url).href; }catch(e){ return null; } };
+  const out=[];
+  const push=(u,extra)=>{
+    const a=abs(u); if(!a) return;
+    const name=decodeURIComponent(a.split('/').pop().split('?')[0]);
+    if(!AUDIO_RE.test(name) && !(extra&&extra.title)) return;
+    out.push(Object.assign({url:a,name,size:0},extra||{}));
+  };
+
+  const trimmed=body.trim();
+  if(trimmed.startsWith('{')||trimmed.startsWith('[')){
+    let data;
+    try{ data=JSON.parse(trimmed); }
+    catch(e){ throw new Error('That file is not valid JSON.'); }
+    const arr=Array.isArray(data) ? data
+            : Array.isArray(data.tracks) ? data.tracks
+            : Array.isArray(data.files) ? data.files : null;
+    if(!arr) throw new Error('The JSON needs to be a list of tracks (or an object with a "tracks" list).');
+    for(const it of arr){
+      if(typeof it==='string'){ push(it); }
+      else if(it && typeof it==='object'){
+        const u=it.url||it.src||it.file||it.path;
+        if(!u) continue;
+        push(u,{title:it.title||null,artist:it.artist||null,album:it.album||null,
+                size:Number(it.size)||0,duration:Number(it.duration)||0,
+                coverUrl:it.cover||it.artwork||null});
+      }
+    }
+  }else{
+    // M3U / M3U8 — honour #EXTINF metadata when present.
+    let pending=null;
+    for(const raw of body.split(/\r?\n/)){
+      const line=raw.trim();
+      if(!line) continue;
+      if(line.startsWith('#')){
+        const m=/^#EXTINF:\s*(-?\d+(?:\.\d+)?)\s*,\s*(.*)$/i.exec(line);
+        if(m){
+          const dur=parseFloat(m[1]); const label=m[2].trim();
+          const dash=label.split(' - ');
+          pending={duration:dur>0?dur:0,
+                   artist:dash.length>=2?dash[0].trim():null,
+                   title:dash.length>=2?dash.slice(1).join(' - ').trim():(label||null)};
+        }
+        continue;
+      }
+      push(line,pending||undefined);
+      pending=null;
+    }
+  }
+  if(!out.length) throw new Error('No audio tracks were listed in that file.');
+  return out;
+}
+
 // Fetch just the head of a remote file and parse ID3 from it.
 async function parseID3Remote(url,cfg){
   const auth=authHeader(cfg);
@@ -1090,7 +1198,9 @@ async function syncRemote(opts){
   if(opts.withOverlay){ overlay.classList.remove('hidden'); $('#importTxt').textContent='Connecting…'; $('#importSub').textContent=serverHost(); }
   let files;
   try{
-    files=await webdavList(serverCfg,n=>{ if(opts.withOverlay){ $('#importTxt').textContent='Found '+n+' tracks…'; } });
+    files = serverCfg.type==='link'
+      ? await manifestList(serverCfg)
+      : await webdavList(serverCfg,n=>{ if(opts.withOverlay){ $('#importTxt').textContent='Found '+n+' tracks…'; } });
   }catch(e){
     if(opts.withOverlay) overlay.classList.add('hidden');
     return {ok:false,error:e.message};
@@ -1102,11 +1212,17 @@ async function syncRemote(opts){
     const f=files[i];
     if(opts.withOverlay){ $('#importTxt').textContent='Syncing '+(i+1)+' of '+files.length; $('#importSub').textContent=f.name; }
     if(existing.has(f.url)) continue;
-    let tags={title:null,artist:null,album:null,cover:null};
-    try{ tags=await parseID3Remote(f.url,serverCfg); }catch(e){}
-    const {title,artist}=deriveTitleArtist(tags,f.name);
-    const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size,
-      title, artist, album:tags.album||'Unknown Album', duration:0, cover:tags.cover||null,
+    let tags={title:null,artist:null,album:null,cover:null,lyrics:null};
+    // If the manifest already described the track, trust it and skip the
+    // range request — some static hosts don't support Range on every object.
+    const described=!!(f.title&&f.artist);
+    if(!described){ try{ tags=await parseID3Remote(f.url,serverCfg); }catch(e){} }
+    const derived=deriveTitleArtist(
+      {title:f.title||tags.title, artist:f.artist||tags.artist}, f.name);
+    const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size||0,
+      title:derived.title, artist:derived.artist,
+      album:f.album||tags.album||'Unknown Album',
+      duration:f.duration||0, cover:tags.cover||null,
       lyrics:tags.lyrics||null, audio:null };
     state.tracks.push(rec);
     if(dbAvailable){ try{ await dbPutTrack(rec); }catch(e){} }
@@ -1415,7 +1531,8 @@ function cloudBar(){
   const remoteCount=state.tracks.filter(t=>t.remote).length;
   info.innerHTML=`<div class="ch"></div><div class="cs"></div>`;
   info.querySelector('.ch').textContent=serverHost();
-  info.querySelector('.cs').textContent=_syncing?'Syncing…':(remoteCount+' track'+(remoteCount!==1?'s':'')+' from server');
+  const src=(serverCfg&&serverCfg.type==='link')?'from your library link':'from server';
+  info.querySelector('.cs').textContent=_syncing?'Syncing…':(remoteCount+' track'+(remoteCount!==1?'s':'')+' '+src);
   bar.appendChild(info);
   if(_syncing){ const sp=el('div','cloud-spin'); bar.appendChild(sp); }
   else{
@@ -2100,6 +2217,7 @@ function wireEvents(){
   $('#serverBackdrop').onclick=closeServerModal;
   $('#svCancel').onclick=closeServerModal;
   $('#svConnect').onclick=doConnectServer;
+  $$('#svType button').forEach(b=>{ b.onclick=()=>setServerType(b.dataset.type); });
 
   $('#editBtn').onclick=()=>{ state.editMode=!state.editMode; render(); };
 
