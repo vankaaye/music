@@ -630,7 +630,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 18';
+const BUILD='build 17';
 
 /* ============================================================
    Small helpers
@@ -1912,7 +1912,6 @@ function buildQueue(list,startId){
 }
 function playFromList(list,startId){
   if(!list||!list.length) return;
-  initWebAudio(); resumeAudioCtx();   // first play is the user gesture iOS needs
   buildQueue(list,startId);
   loadTrack(startId,true);
   $('#mini').classList.add('show');
@@ -1931,7 +1930,7 @@ function loadTrack(id,autoplay){
   }else{
     return; // no playable source
   }
-  applyVolume(state.volume);
+  audio.volume=state.volume;
   updateNowPlayingUI(t);
   setMediaSession(t);
   if(lyr.open) loadLyricsForCurrent(true);   // new track -> refresh lyrics
@@ -1952,7 +1951,6 @@ function stopPlayback(){
   syncPlayUI();
 }
 function togglePlay(){
-  initWebAudio(); resumeAudioCtx();
   if(state.qIndex<0){
     // nothing loaded: start first song of current context
     const list=currentSongContext().length?currentSongContext():sortSongs(filtered());
@@ -2057,45 +2055,6 @@ let airplayMode=null;   // 'webkit' | 'remote' | null
    while the audio output is unchanged, so a slider bound to it would sit at a
    level that has nothing to do with what you hear. Sniff the platform first,
    then fall back to probing for browsers that reject the write outright. */
-/* ---- Volume via Web Audio ----
-   iOS ignores media-element volume entirely, so route playback through a gain
-   node instead: that the app *can* control. The tap is permanent for this
-   element, and cross-origin audio must be CORS-readable or Web Audio outputs
-   silence — hence crossOrigin below. Falls back to element volume if the
-   AudioContext cannot be created. */
-let actx=null, gainNode=null, srcNode=null, webAudio=false, webAudioTried=false;
-
-function webAudioSupported(){ return !!(window.AudioContext||window.webkitAudioContext); }
-
-function initWebAudio(){
-  if(webAudioTried) return webAudio;
-  webAudioTried=true;
-  try{
-    const AC=window.AudioContext||window.webkitAudioContext;
-    if(!AC) return false;
-    actx=new AC();
-    srcNode=actx.createMediaElementSource(audio);
-    gainNode=actx.createGain();
-    gainNode.gain.value=state.volume;
-    srcNode.connect(gainNode);
-    gainNode.connect(actx.destination);
-    audio.volume=1;              // element stays wide open; gain does the work
-    webAudio=true;
-  }catch(e){ webAudio=false; }
-  if(webAudio) $('#np').classList.remove('no-vol');
-  return webAudio;
-}
-// iOS starts the context suspended until a user gesture.
-function resumeAudioCtx(){
-  if(actx && actx.state==='suspended'){ actx.resume().catch(()=>{}); }
-}
-function applyVolume(v){
-  v=Math.max(0,Math.min(1,v));
-  state.volume=v;
-  if(webAudio && gainNode){ gainNode.gain.value=v; audio.volume=1; }
-  else{ try{ audio.volume=v; }catch(e){} }
-}
-
 function isIOS(){
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
          // iPadOS 13+ reports itself as a Mac; touch points give it away.
@@ -2307,7 +2266,7 @@ async function restoreLastState(){
   let s=null;
   try{ s=await dbGetMeta('lastState'); }catch(e){}
   if(!s)return;
-  if(typeof s.volume==='number'){ applyVolume(s.volume); $('#vol').value=Math.round(s.volume*100); }
+  if(typeof s.volume==='number'){ state.volume=s.volume; audio.volume=s.volume; $('#vol').value=Math.round(s.volume*100); }
   state.shuffle=!!s.shuffle; state.repeat=s.repeat||'off';
   reflectShuffleRepeat();
   if(s.trackId && trackById(s.trackId)){
@@ -2326,7 +2285,7 @@ async function restoreLastState(){
     }else{
       return; // nothing playable to restore
     }
-    applyVolume(state.volume);
+    audio.volume=state.volume;
     updateNowPlayingUI(t);
     setMediaSession(t);
     // restore position paused
@@ -2426,7 +2385,7 @@ function wireEvents(){
 
   // volume
   $('#vol').addEventListener('input',e=>{
-    applyVolume(e.target.value/100);
+    state.volume=e.target.value/100; audio.volume=state.volume;
   });
   $('#vol').addEventListener('change',saveLastState);
 
@@ -2485,10 +2444,7 @@ async function boot(){
 
   setupAirplay();
 
-  // Web Audio gives volume control even where the element property is ignored.
-  if(!webAudioSupported() && !volumeControlWorks()) $('#np').classList.add('no-vol');
-  // Cross-origin media must be CORS-readable, or the Web Audio tap is silent.
-  try{ audio.crossOrigin='anonymous'; }catch(e){}
+  if(!volumeControlWorks()) $('#np').classList.add('no-vol');
 
   if(dbAvailable){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
