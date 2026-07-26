@@ -24,8 +24,30 @@ device.
   scales while playing, the blurred cover as the background, MediaSession
   integration for lock-screen / headphone / car controls, and it remembers and
   restores the last track and position (paused) on next launch.
+- **Your own server (WebDAV / TrueNAS)** — connect a WebDAV share and the app
+  lists it recursively, reads tags, and streams tracks on demand. Connect the
+  same server from your phone, tablet and desktop to get the same library
+  everywhere. Refresh picks up newly added files and prunes deleted ones;
+  Disconnect removes the server's tracks from the device. Credentials are
+  stored only on that device, and a service worker attaches them to media
+  requests so seeking works.
 - **Desktop** — drop audio files anywhere on the page to add them; space /
   arrow keys control playback.
+
+### Connecting a server
+
+**+ → Connect Server…**, then enter the WebDAV URL (e.g.
+`https://nas.example.com/webdav`), an optional subfolder, and credentials.
+
+Your server must:
+- be reachable over **HTTPS** (a page served over HTTPS cannot call `http://`),
+- allow **WebDAV `PROPFIND`** on that path,
+- send **CORS** headers permitting this site — `Access-Control-Allow-Origin`,
+  plus `Authorization`, `Depth`, `Range` in `Access-Control-Allow-Headers`, and
+  `PROPFIND` in `Access-Control-Allow-Methods`.
+
+To reach a home NAS from outside the house, expose it through a reverse proxy
+with a real certificate, or join the devices with a VPN such as Tailscale.
 
 ## Tech
 

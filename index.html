@@ -299,6 +299,39 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .sheet-cancel:active{background:rgba(255,255,255,.06)}
 @media (prefers-reduced-motion:reduce){.sheet-card{animation:none}}
 
+/* server connection modal */
+#serverModal{position:absolute;inset:0;z-index:66;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.6)}
+.modal-card{position:relative;width:100%;max-width:400px;background:var(--panel);border-radius:16px;padding:20px;max-height:90%;overflow-y:auto;animation:sheetUp .25s cubic-bezier(.2,.8,.2,1)}
+.modal-title{font-size:20px;font-weight:700}
+.modal-sub{font-size:13px;color:var(--text-2);margin:4px 0 14px;line-height:1.4}
+.fld{display:block;font-size:13px;color:var(--text-2);margin-bottom:12px}
+.fld .opt{color:#6a6a6f}
+.fld input{display:block;width:100%;height:44px;margin-top:6px;border:0;border-radius:10px;background:var(--panel-2);color:var(--text);font-size:16px;padding:0 12px;outline:none}
+.fld input:focus{box-shadow:0 0 0 2px var(--accent) inset}
+.modal-note{font-size:12px;color:#6a6a6f;margin:2px 0 12px;line-height:1.4}
+.modal-err{font-size:13px;color:#ff6b6b;background:rgba(255,59,48,.12);border-radius:8px;padding:9px 11px;margin-bottom:12px;line-height:1.4}
+.modal-actions{display:flex;gap:10px}
+.m-btn{flex:1;height:46px;border-radius:11px;font-size:16px;font-weight:600}
+.m-btn.ghost{background:var(--panel-2);color:var(--text)}
+.m-btn.primary{background:var(--accent);color:#fff}
+.m-btn:active{opacity:.85}
+.m-btn[disabled]{opacity:.5}
+
+/* cloud connection bar */
+.cloud-bar{
+  display:flex;align-items:center;gap:10px;
+  margin:8px calc(16px + var(--sar)) 2px calc(16px + var(--sal));
+  background:var(--panel);border-radius:10px;padding:9px 12px;
+}
+.cloud-bar svg{width:20px;height:20px;fill:var(--accent);flex:none}
+.cloud-bar .ci{flex:1;min-width:0}
+.cloud-bar .ch{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cloud-bar .cs{font-size:12px;color:var(--text-2)}
+.cloud-bar button{font-size:14px;font-weight:600;color:var(--accent);padding:6px 8px;flex:none}
+.cloud-bar button.dis{color:var(--text-2)}
+.cloud-spin{width:16px;height:16px;border:2px solid var(--panel-2);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;flex:none}
+
 /* import overlay */
 #importOverlay{
   position:absolute;inset:0;z-index:60;background:rgba(0,0,0,.75);
@@ -433,7 +466,35 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
       <div class="sheet-title">Add Music</div>
       <button class="sheet-opt" id="optFiles">Choose Files…</button>
       <button class="sheet-opt" id="optFolder">Choose Folder…</button>
+      <button class="sheet-opt" id="optServer">Connect Server…</button>
       <button class="sheet-cancel" id="optCancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Server (WebDAV / TrueNAS) connection modal -->
+  <div id="serverModal" class="hidden" role="dialog" aria-label="Connect server">
+    <div class="modal-backdrop" id="serverBackdrop"></div>
+    <div class="modal-card">
+      <div class="modal-title">Connect Server</div>
+      <div class="modal-sub">Stream your library from a WebDAV / TrueNAS server so it’s the same on every device.</div>
+      <label class="fld">Server URL
+        <input id="svUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://nas.example.com/webdav">
+      </label>
+      <label class="fld">Folder <span class="opt">(optional)</span>
+        <input id="svPath" autocapitalize="off" autocorrect="off" placeholder="/Music">
+      </label>
+      <label class="fld">Username <span class="opt">(optional)</span>
+        <input id="svUser" autocapitalize="off" autocorrect="off" autocomplete="username" placeholder="">
+      </label>
+      <label class="fld">Password <span class="opt">(optional)</span>
+        <input id="svPass" type="password" autocomplete="current-password" placeholder="">
+      </label>
+      <div class="modal-note">Saved only on this device. Your server must allow this site via CORS.</div>
+      <div class="modal-err hidden" id="svErr"></div>
+      <div class="modal-actions">
+        <button id="svCancel" class="m-btn ghost">Cancel</button>
+        <button id="svConnect" class="m-btn primary">Connect</button>
+      </div>
     </div>
   </div>
 </div>
@@ -681,6 +742,36 @@ function pickAndImport(){ openAddSheet(); }
 function openAddSheet(){ $('#sheet').classList.remove('hidden'); }
 function closeAddSheet(){ $('#sheet').classList.add('hidden'); }
 
+function openServerModal(){
+  if(serverCfg){
+    $('#svUrl').value=serverCfg.base||''; $('#svPath').value=serverCfg.path||'';
+    $('#svUser').value=serverCfg.user||''; $('#svPass').value=serverCfg.pass||'';
+  }
+  $('#svErr').classList.add('hidden');
+  $('#serverModal').classList.remove('hidden');
+}
+function closeServerModal(){ $('#serverModal').classList.add('hidden'); }
+function showServerError(msg){
+  const e=$('#svErr'); e.textContent=msg; e.classList.remove('hidden');
+  $('#serverModal').classList.remove('hidden');
+}
+async function doConnectServer(){
+  const base=$('#svUrl').value.trim();
+  if(!base){ showServerError('Enter your server URL.'); return; }
+  if(!/^https?:\/\//i.test(base)){ showServerError('URL must start with http:// or https://'); return; }
+  if(location.protocol==='https:' && /^http:\/\//i.test(base)){
+    showServerError('This page is HTTPS, so the server must be HTTPS too — browsers block insecure requests from a secure page.');
+    return;
+  }
+  const cfg={ base, path:$('#svPath').value.trim(), user:$('#svUser').value, pass:$('#svPass').value };
+  const btn=$('#svConnect'); btn.disabled=true; btn.textContent='Connecting…';
+  $('#svErr').classList.add('hidden');
+  const res=await connectAndSync(cfg);
+  btn.disabled=false; btn.textContent='Connect';
+  if(res.ok){ closeServerModal(); }
+  else{ await clearServerCfg(); showServerError(res.error||'Could not connect.'); }
+}
+
 async function importFiles(fileList){
   const files=Array.from(fileList).filter(f=>/^audio\//.test(f.type)||/\.(mp3|m4a|aac|wav|ogg|oga|flac|opus)$/i.test(f.name));
   if(!files.length) return;
@@ -707,20 +798,7 @@ async function importFiles(fileList){
     let tags={title:null,artist:null,album:null,cover:null};
     try{ tags=await parseID3(f); }catch(e){}
 
-    // filename fallback "Artist - Title"
-    let title=tags.title, artist=tags.artist;
-    if(!title || !artist){
-      const base=f.name.replace(/\.[^.]+$/,'');
-      const parts=base.split(' - ');
-      if(parts.length>=2){
-        if(!artist) artist=parts[0].trim();
-        if(!title) title=parts.slice(1).join(' - ').trim();
-      }else{
-        if(!title) title=base.trim();
-      }
-    }
-    if(!artist) artist='Unknown Artist';
-    if(!title) title=f.name.replace(/\.[^.]+$/,'');
+    const {title,artist}=deriveTitleArtist(tags,f.name);
     const album=tags.album||'Unknown Album';
 
     const duration=await readDuration(f);
@@ -741,6 +819,24 @@ async function importFiles(fileList){
 
   overlay.classList.add('hidden');
   render();
+}
+
+// Derive title/artist from ID3 tags, falling back to "Artist - Title" filename.
+function deriveTitleArtist(tags,filename){
+  let title=tags.title, artist=tags.artist;
+  if(!title || !artist){
+    const base=filename.replace(/\.[^.]+$/,'');
+    const parts=base.split(' - ');
+    if(parts.length>=2){
+      if(!artist) artist=parts[0].trim();
+      if(!title) title=parts.slice(1).join(' - ').trim();
+    }else{
+      if(!title) title=base.trim();
+    }
+  }
+  if(!artist) artist='Unknown Artist';
+  if(!title) title=filename.replace(/\.[^.]+$/,'');
+  return {title,artist};
 }
 
 function readDuration(file){
@@ -769,6 +865,140 @@ function libBytes(){
   }
   return n;
 }
+
+/* ============================================================
+   Remote source (WebDAV / TrueNAS) — stream your own library so it
+   is identical on every device that connects to the same server.
+============================================================ */
+let serverCfg=null;   // { base, path, user, pass }
+
+async function loadServerCfg(){
+  if(!dbAvailable) return null;
+  try{ const m=await dbGetMeta('server'); serverCfg=m&&m.base?{base:m.base,path:m.path||'',user:m.user||'',pass:m.pass||''}:null; }
+  catch(e){ serverCfg=null; }
+  return serverCfg;
+}
+async function saveServerCfg(cfg){
+  serverCfg=cfg;
+  if(dbAvailable){ try{ await dbSetMeta('server',cfg); }catch(e){} }
+  // hand the config to the service worker so it can inject auth on media requests
+  try{ if(navigator.serviceWorker&&navigator.serviceWorker.controller){ navigator.serviceWorker.controller.postMessage({type:'server-cfg',cfg}); } }catch(e){}
+}
+async function clearServerCfg(){
+  serverCfg=null;
+  if(dbAvailable){ try{ await dbSetMeta('server',{}); }catch(e){} }
+  try{ if(navigator.serviceWorker&&navigator.serviceWorker.controller){ navigator.serviceWorker.controller.postMessage({type:'server-cfg',cfg:null}); } }catch(e){}
+}
+function authHeader(cfg){ return cfg&&cfg.user ? 'Basic '+btoa(unescape(encodeURIComponent(cfg.user+':'+(cfg.pass||'')))) : null; }
+function listRoot(cfg){
+  let b=cfg.base.replace(/\/+$/,'');
+  let p=(cfg.path||'').trim();
+  if(p && !p.startsWith('/')) p='/'+p;
+  return b + p.replace(/\/+$/,'') + '/';
+}
+function hashStr(s){ let h=5381; for(let i=0;i<s.length;i++){ h=((h<<5)+h)^s.charCodeAt(i); } return (h>>>0).toString(36); }
+
+const AUDIO_RE=/\.(mp3|m4a|aac|flac|wav|ogg|oga|opus|wma)$/i;
+
+// Recursive WebDAV PROPFIND listing of audio files.
+async function webdavList(cfg,onProgress){
+  const auth=authHeader(cfg);
+  const out=[]; const seen=new Set();
+  const body='<?xml version="1.0" encoding="utf-8"?>'+
+    '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getcontenttype/></d:prop></d:propfind>';
+  async function crawl(url,depth){
+    if(depth>8) return;
+    const headers={'Depth':'1','Content-Type':'application/xml'};
+    if(auth) headers['Authorization']=auth;
+    let res;
+    try{ res=await fetch(url,{method:'PROPFIND',headers,body}); }
+    catch(e){ throw new Error('Could not reach the server. Check the URL, HTTPS, and that CORS is enabled. ('+e.message+')'); }
+    if(res.status===401||res.status===403) throw new Error('Authentication failed — check the username and password.');
+    if(res.status===405) throw new Error('Server does not allow WebDAV listing (PROPFIND) at that URL.');
+    if(!res.ok) throw new Error('Server returned HTTP '+res.status+' while listing.');
+    const xml=new DOMParser().parseFromString(await res.text(),'application/xml');
+    const responses=xml.getElementsByTagNameNS('DAV:','response');
+    const subfolders=[];
+    for(const r of responses){
+      const hrefEl=r.getElementsByTagNameNS('DAV:','href')[0];
+      if(!hrefEl) continue;
+      let abs; try{ abs=new URL(hrefEl.textContent.trim(),url).href; }catch(_){ continue; }
+      const norm=abs.replace(/\/+$/,'');
+      if(norm===url.replace(/\/+$/,'')) continue;      // the folder itself
+      if(seen.has(norm)) continue; seen.add(norm);
+      const isDir=r.getElementsByTagNameNS('DAV:','collection').length>0;
+      if(isDir){ subfolders.push(abs.endsWith('/')?abs:abs+'/'); }
+      else{
+        const name=decodeURIComponent(norm.split('/').pop());
+        if(AUDIO_RE.test(name)){
+          const lenEl=r.getElementsByTagNameNS('DAV:','getcontentlength')[0];
+          out.push({url:abs,name,size:lenEl?parseInt(lenEl.textContent,10)||0:0});
+          if(onProgress) onProgress(out.length);
+        }
+      }
+    }
+    for(const f of subfolders) await crawl(f,depth+1);
+  }
+  await crawl(listRoot(cfg),0);
+  return out;
+}
+
+// Fetch just the head of a remote file and parse ID3 from it.
+async function parseID3Remote(url,cfg){
+  const auth=authHeader(cfg);
+  const headers={'Range':'bytes=0-262143'};
+  if(auth) headers['Authorization']=auth;
+  let res;
+  try{ res=await fetch(url,{headers}); }catch(e){ return {title:null,artist:null,album:null,cover:null}; }
+  if(!(res.ok||res.status===206)) return {title:null,artist:null,album:null,cover:null};
+  const buf=await res.arrayBuffer();
+  return parseID3(new Blob([buf]));
+}
+
+async function connectAndSync(cfg){
+  await saveServerCfg(cfg);
+  return syncRemote({withOverlay:true});
+}
+
+async function syncRemote(opts){
+  opts=opts||{};
+  if(!serverCfg) return {ok:false,error:'not-configured'};
+  const overlay=$('#importOverlay');
+  if(opts.withOverlay){ overlay.classList.remove('hidden'); $('#importTxt').textContent='Connecting…'; $('#importSub').textContent=serverHost(); }
+  let files;
+  try{
+    files=await webdavList(serverCfg,n=>{ if(opts.withOverlay){ $('#importTxt').textContent='Found '+n+' tracks…'; } });
+  }catch(e){
+    if(opts.withOverlay) overlay.classList.add('hidden');
+    return {ok:false,error:e.message};
+  }
+  const existing=new Set(state.tracks.filter(t=>t.remote).map(t=>t.url));
+  const foundUrls=new Set(files.map(f=>f.url));
+  let added=0;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    if(opts.withOverlay){ $('#importTxt').textContent='Syncing '+(i+1)+' of '+files.length; $('#importSub').textContent=f.name; }
+    if(existing.has(f.url)) continue;
+    let tags={title:null,artist:null,album:null,cover:null};
+    try{ tags=await parseID3Remote(f.url,serverCfg); }catch(e){}
+    const {title,artist}=deriveTitleArtist(tags,f.name);
+    const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size,
+      title, artist, album:tags.album||'Unknown Album', duration:0, cover:tags.cover||null, audio:null };
+    state.tracks.push(rec);
+    if(dbAvailable){ try{ await dbPutTrack(rec); }catch(e){} }
+    existing.add(f.url); added++;
+    if(i%4===0) render();
+  }
+  // prune remote tracks that no longer exist on the server
+  const removed=[];
+  state.tracks=state.tracks.filter(t=>{ if(t.remote&&!foundUrls.has(t.url)){ removed.push(t.id); return false; } return true; });
+  for(const id of removed){ revokeCover(id); if(dbAvailable){ try{ await dbDeleteTrack(id); }catch(e){} } }
+  if(opts.withOverlay) overlay.classList.add('hidden');
+  render();
+  return {ok:true,added,removed:removed.length,total:files.length};
+}
+
+function serverHost(){ try{ return new URL(serverCfg.base).host; }catch(e){ return serverCfg?serverCfg.base:''; } }
 
 /* ============================================================
    Grouping helpers
@@ -809,6 +1039,8 @@ function render(){
 
   content.innerHTML='';
 
+  if(serverCfg) content.appendChild(cloudBar());
+
   if(state.tracks.length===0){
     renderEmpty();
     updateTabsUI();
@@ -827,16 +1059,54 @@ function render(){
   updateTabsUI();
 }
 
+let _syncing=false;
+function cloudBar(){
+  const bar=el('div','cloud-bar');
+  const icon='<svg viewBox="0 0 24 24"><path d="M6.5 20A4.5 4.5 0 0 1 6 11.03 6 6 0 0 1 17.7 9.2 4.4 4.4 0 0 1 18 18h-.5"/></svg>';
+  bar.innerHTML=icon;
+  bar.querySelector('svg').setAttribute('fill','none');
+  bar.querySelector('svg').setAttribute('stroke','var(--accent)');
+  bar.querySelector('svg').setAttribute('stroke-width','1.6');
+  const info=el('div','ci');
+  const remoteCount=state.tracks.filter(t=>t.remote).length;
+  info.innerHTML=`<div class="ch"></div><div class="cs"></div>`;
+  info.querySelector('.ch').textContent=serverHost();
+  info.querySelector('.cs').textContent=_syncing?'Syncing…':(remoteCount+' track'+(remoteCount!==1?'s':'')+' from server');
+  bar.appendChild(info);
+  if(_syncing){ const sp=el('div','cloud-spin'); bar.appendChild(sp); }
+  else{
+    const refresh=el('button'); refresh.textContent='Refresh';
+    refresh.onclick=async()=>{ _syncing=true; render(); const r=await syncRemote({withOverlay:false}); _syncing=false; render(); if(!r.ok) showServerError(r.error); };
+    const disc=el('button','dis'); disc.textContent='Disconnect';
+    disc.onclick=disconnectServer;
+    bar.appendChild(refresh); bar.appendChild(disc);
+  }
+  return bar;
+}
+
+async function disconnectServer(){
+  await clearServerCfg();
+  const removed=state.tracks.filter(t=>t.remote).map(t=>t.id);
+  state.tracks=state.tracks.filter(t=>!t.remote);
+  for(const id of removed){ revokeCover(id); if(dbAvailable){ try{ await dbDeleteTrack(id); }catch(e){} } }
+  // if the current track was remote, stop
+  if(state.qIndex>=0 && !trackById(state.queue[state.qIndex])) stopPlayback();
+  render();
+}
+
 function renderEmpty(){
   const e=el('div','empty');
   e.innerHTML=`
     <svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
     <h3>Your library is empty</h3>
-    <p>Add music files from your device to start listening. Everything stays on your phone.</p>
+    <p>Add music from this device, or connect your own server (WebDAV / TrueNAS) to stream the same library everywhere.</p>
     <button class="big-add" id="emptyAdd">Add Music</button>`;
   content.appendChild(e);
   $('#emptyAdd').onclick=pickAndImport;
 }
+
+// duration text: unknown remote durations show a dash until first played
+function durText(t){ return (t.duration&&isFinite(t.duration)) ? fmtTime(t.duration) : '–'; }
 
 function songRow(t){
   const row=el('div','song');
@@ -856,7 +1126,7 @@ function songRow(t){
     del.onclick=e=>{ e.stopPropagation(); removeTrack(t.id); };
     row.appendChild(del);
   }else{
-    const dur=el('div','dur'); dur.textContent=fmtTime(t.duration);
+    const dur=el('div','dur'); dur.textContent=durText(t);
     row.appendChild(dur);
   }
   row.onclick=()=>{ if(state.editMode)return; playFromList(currentSongContext(),t.id); };
@@ -957,7 +1227,7 @@ function trackRow(t,num,type){
     del.onclick=e=>{ e.stopPropagation(); removeTrack(t.id); };
     row.appendChild(del);
   }else{
-    const d=el('div','tdur'); d.textContent=fmtTime(t.duration); row.appendChild(d);
+    const d=el('div','tdur'); d.textContent=durText(t); row.appendChild(d);
   }
   row.onclick=()=>{ if(state.editMode)return; playFromList(_lastContextList,t.id); };
   return row;
@@ -1064,8 +1334,15 @@ function loadTrack(id,autoplay){
   const t=trackById(id);
   if(!t)return;
   if(currentAudioUrl){ URL.revokeObjectURL(currentAudioUrl); currentAudioUrl=null; }
-  currentAudioUrl=URL.createObjectURL(t.audio);
-  audio.src=currentAudioUrl;
+  if(t.remote){
+    // Streamed from the WebDAV server; the service worker injects auth + Range passes through.
+    audio.src=t.url;
+  }else if(t.audio){
+    currentAudioUrl=URL.createObjectURL(t.audio);
+    audio.src=currentAudioUrl;
+  }else{
+    return; // no playable source
+  }
   audio.volume=state.volume;
   updateNowPlayingUI(t);
   setMediaSession(t);
@@ -1118,6 +1395,16 @@ function prev(){
   loadTrack(state.queue[pi],true);
 }
 
+// Remote tracks arrive without a duration; record it the first time we learn it.
+audio.addEventListener('loadedmetadata',()=>{
+  if(state.qIndex<0)return;
+  const t=trackById(state.queue[state.qIndex]);
+  if(t && (!t.duration||!isFinite(t.duration)) && isFinite(audio.duration) && audio.duration>0){
+    t.duration=audio.duration;
+    if(dbAvailable){ try{ dbPutTrack(t); }catch(e){} }
+    render();
+  }
+});
 audio.addEventListener('ended',()=>next(true));
 audio.addEventListener('timeupdate',onTime);
 audio.addEventListener('play',()=>{state.playing=true;syncPlayUI();updatePositionState();});
@@ -1240,9 +1527,15 @@ async function restoreLastState(){
     state.queue=all.map(t=>t.id);
     state.qIndex=state.queue.indexOf(s.trackId);
     const t=trackById(s.trackId);
-    if(currentAudioUrl){URL.revokeObjectURL(currentAudioUrl);}
-    currentAudioUrl=URL.createObjectURL(t.audio);
-    audio.src=currentAudioUrl;
+    if(currentAudioUrl){URL.revokeObjectURL(currentAudioUrl);currentAudioUrl=null;}
+    if(t.remote){
+      audio.src=t.url;
+    }else if(t.audio){
+      currentAudioUrl=URL.createObjectURL(t.audio);
+      audio.src=currentAudioUrl;
+    }else{
+      return; // nothing playable to restore
+    }
     audio.volume=state.volume;
     updateNowPlayingUI(t);
     setMediaSession(t);
@@ -1275,6 +1568,12 @@ function wireEvents(){
   $('#optCancel').onclick=closeAddSheet;
   $('#optFiles').onclick=()=>{ closeAddSheet(); $('#fileInput').click(); };
   $('#optFolder').onclick=()=>{ closeAddSheet(); $('#folderInput').click(); };
+  $('#optServer').onclick=()=>{ closeAddSheet(); openServerModal(); };
+
+  // server modal
+  $('#serverBackdrop').onclick=closeServerModal;
+  $('#svCancel').onclick=closeServerModal;
+  $('#svConnect').onclick=doConnectServer;
 
   $('#editBtn').onclick=()=>{ state.editMode=!state.editMode; render(); };
 
@@ -1388,6 +1687,7 @@ async function boot(){
 
   if(dbAvailable){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
+    await loadServerCfg();
   }
   reflectShuffleRepeat();
   render();
@@ -1395,7 +1695,16 @@ async function boot(){
 
   // register service worker (only over http/https)
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-    try{ await navigator.serviceWorker.register('sw.js'); }catch(e){}
+    try{
+      await navigator.serviceWorker.register('sw.js');
+      // Once the worker controls the page, give it the server credentials so it
+      // can authorize media streaming requests.
+      await navigator.serviceWorker.ready;
+      const send=()=>{ if(navigator.serviceWorker.controller && serverCfg){
+        navigator.serviceWorker.controller.postMessage({type:'server-cfg',cfg:serverCfg}); } };
+      send();
+      navigator.serviceWorker.addEventListener('controllerchange',send);
+    }catch(e){}
   }
 }
 function showWarning(e){
