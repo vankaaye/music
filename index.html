@@ -239,10 +239,13 @@ input{font-family:inherit}
   padding:calc(var(--sat) + 8px) calc(24px + var(--sar)) calc(var(--sab) + 20px) calc(24px + var(--sal));
 }
 .np-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex:none}
-.np-back,.np-head-sp{width:40px;height:40px;flex:none}
-.np-back{display:flex;align-items:center;justify-content:center;border-radius:50%;color:rgba(255,255,255,.9)}
-.np-back svg{width:26px;height:26px}
-.np-back:active{background:rgba(255,255,255,.14)}
+.np-head-sp{width:86px;flex:none}
+.np-back{
+  display:flex;align-items:center;gap:1px;height:40px;padding:0 12px 0 4px;
+  border-radius:20px;color:#fff;font-size:17px;font-weight:500;flex:none;min-width:86px;
+}
+.np-back svg{width:24px;height:24px;flex:none}
+.np-back:active{background:rgba(255,255,255,.16)}
 .np-grip{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,.4);margin:0 auto;flex:1;max-width:38px}
 .np-art-wrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:12px 0}
 #npArt{
@@ -462,8 +465,8 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
       <input id="search" type="search" placeholder="Search" autocomplete="off" autocorrect="off" autocapitalize="off">
     </div>
     <div class="segmented" id="tabs">
-      <button data-tab="songs" class="active">Songs</button>
-      <button data-tab="albums">Albums</button>
+      <button data-tab="albums" class="active">Albums</button>
+      <button data-tab="songs">Songs</button>
       <button data-tab="artists">Artists</button>
     </div>
   </header>
@@ -495,8 +498,9 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
     <div class="scrim"></div>
     <div class="np-inner">
       <div class="np-head">
-        <button id="npBack" class="np-back" aria-label="Close now playing">
-          <svg viewBox="0 0 24 24"><path d="M6 9.5l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <button id="npBack" class="np-back" aria-label="Back">
+          <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Back</span>
         </button>
         <div class="np-grip" id="npGrip"></div>
         <div class="np-head-sp"></div>
@@ -625,7 +629,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 13';
+const BUILD='build 14';
 
 /* ============================================================
    Small helpers
@@ -839,7 +843,7 @@ async function dbSetMeta(key,val){ if(!db)return; return idbReq(tx('meta','readw
 ============================================================ */
 const state={
   tracks:[],              // {id,name,size,title,artist,album,duration,cover(Blob|null),audio(Blob)}
-  view:'songs',           // songs|albums|artists
+  view:'albums',          // albums|songs|artists
   drill:null,             // {type:'album'|'artist', key:''}
   search:'',
   editMode:false,
@@ -2025,6 +2029,12 @@ function setLyricsOpen(on){
 
 function currentTrack(){ return state.qIndex>=0 ? trackById(state.queue[state.qIndex]) : null; }
 
+// One step back: from lyrics to the now playing view, otherwise to the library.
+function npBack(){
+  if(lyr.open){ setLyricsOpen(false); return; }
+  closeNP();
+}
+
 async function loadLyricsForCurrent(force){
   const t=currentTrack();
   const box=$('#lyrScroll');
@@ -2233,8 +2243,8 @@ function wireEvents(){
   $('#miniPlay').onclick=e=>{ e.stopPropagation(); togglePlay(); };
   $('#miniNext').onclick=e=>{ e.stopPropagation(); next(false); };
 
-  // close the now playing sheet
-  $('#npBack').onclick=closeNP;
+  // Back steps out one level: lyrics -> now playing -> library.
+  $('#npBack').onclick=npBack;
 
   // lyrics
   $('#btnLyrics').onclick=()=>setLyricsOpen(!lyr.open);
@@ -2297,7 +2307,7 @@ function wireEvents(){
     if(e.code==='Space'){ e.preventDefault(); togglePlay(); }
     else if(e.code==='ArrowRight') next(false);
     else if(e.code==='ArrowLeft') prev();
-    else if(e.code==='Escape' && state.npOpen) closeNP();
+    else if(e.code==='Escape' && state.npOpen) npBack();
   });
 
   // reflect connectivity changes (offline banner / streaming availability)
