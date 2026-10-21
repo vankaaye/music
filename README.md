@@ -79,6 +79,16 @@ device.
   then the rest of the queue. Tap a row to jump to it, or remove one from the
   queue without deleting it from the library. Lyrics and the queue share the
   artwork area, one at a time, and Back steps out of whichever is open.
+- **Lyrics sources** — LRCLIB first (time-synced where it exists), with titles
+  and artists cleaned for the search: "(From …)" and bracket junk removed, only
+  the first artist used, and a joined spelling tried because Telugu titles are
+  romanised inconsistently ("Butta Bomma" is "ButtaBomma" on the synced entry).
+  Hits are ranked so the right song wins over a similarly named one. Songs
+  LRCLIB lacks fall back to JioSaavn through the Worker (`/lyrics`), which
+  covers many Telugu and Hindi songs as plain, untimed text. That endpoint is
+  unofficial and may change or stop working; the app is fine without it. A
+  failed lookup caused by the network is never remembered as "no lyrics", and a
+  genuine miss is retried after three days.
 - **Lyrics** — a lyrics button in Now Playing shows time-synced lyrics with the
   current line highlighted and auto-scrolled, Apple Music style; tap any line to
   jump to it. Lyrics come from the file's own embedded ID3 tags first, then from

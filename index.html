@@ -717,7 +717,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 // The shared library everyone opens by default — the public bucket's manifest.
 const DEFAULT_LIBRARY='https://pub-80c11d7cadda4d108efd1e66727be54e.r2.dev/library.json';
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 30';
+const BUILD='build 31';
 
 /* ============================================================
    Small helpers
@@ -1501,7 +1501,9 @@ function parseLRC(text){
 }
 
 function lyricsCacheKey(t){
-  return 'lyr_'+hashStr([(t.artist||''),(t.title||displayTitle(t)),(t.album||'')].join('|').toLowerCase());
+  // v2: earlier builds cached "not found" from a weaker search, and a network
+  // error was sometimes saved as a miss. New prefix so those get retried.
+  return 'lyr2_'+hashStr([(t.artist||''),(t.title||displayTitle(t)),(t.album||'')].join('|').toLowerCase());
 }
 async function cachedLyrics(t){
   if(!dbAvailable) return null;
@@ -1512,34 +1514,105 @@ async function cacheLyrics(t,payload){
   try{ await dbSetMeta(lyricsCacheKey(t),payload); }catch(e){}
 }
 
+// Where the lyrics fallback lives (Cloudflare Worker, see worker/).
+const LYRICS_PROXY='https://music-admin.astrocare.workers.dev/lyrics';
+
+/* ---- query cleaning ----
+   Telugu/Hindi film songs carry titles like  Butta Bomma (From "Ala
+   Vaikunthapurramuloo")  and artist tags that list five singers. Searching with
+   that verbatim finds nothing, so reduce them to what identifies the song. */
+function lyricTitle(raw){
+  return stripJunk(raw||'')
+    .replace(/[\(\[][^\)\]]*[\)\]]/g,' ')                 // (From "..."), [Remix]
+    .replace(/\s[-–—]\s*(from|original|official|lyric|video|audio|remix|version)\b.*$/i,' ')
+    .replace(/\b(feat\.?|ft\.?)\b.*$/i,' ')
+    .replace(/\s{2,}/g,' ').trim();
+}
+function lyricArtists(raw){
+  const a=String(raw||'').replace(/^Unknown Artist$/,'');
+  return a.split(/\s*(?:,|&|\/|\bfeat\.?\b|\bft\.?\b|\band\b)\s*/i)
+          .map(x=>x.trim()).filter(x=>x.length>1);
+}
+const lyrSquash=s=>String(s||'').toLowerCase().replace(/[\(\[][^\)\]]*[\)\]]/g,' ').replace(/[^a-z0-9ऀ-ॿఀ-౿]+/g,'');
+
+// Pick the best LRCLIB hit: right song first, then synced, then artist/duration.
+function pickLrclib(arr,title,artists,dur){
+  const want=lyrSquash(title); if(!want) return null;
+  const toks=artists.map(a=>a.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim()).filter(a=>a.length>2);
+  let best=null,bestScore=-1;
+  for(const x of arr||[]){
+    if(!x||(!x.syncedLyrics&&!x.plainLyrics)) continue;
+    const t=lyrSquash(x.trackName||x.name);
+    // Same song, or LRCLIB's "Artist - Title" form. A looser "contains" test
+    // would accept "Yellow Submarine" for "Yellow".
+    const prefixed=artists.some(a=>t===lyrSquash(a)+want);
+    if(!(t===want||prefixed)) continue;
+    let sc=t===want?6:4;
+    sc+=x.syncedLyrics?4:0;
+    const hay=String(x.artistName||'').toLowerCase();
+    for(const tk of toks) if(hay.includes(tk)) sc+=3;
+    if(dur&&x.duration){ const d=Math.abs(x.duration-dur); sc+= d<=4?3 : d<=12?1 : -3; }
+    if(sc>bestScore){ bestScore=sc; best=x; }
+  }
+  return best;
+}
+
+// Returns {data, failed}. failed=true means we never got an answer (network),
+// which must NOT be remembered as "no lyrics".
 async function lrclibFetch(t){
-  const artist=(t.artist||'').replace(/^Unknown Artist$/,'').trim();
-  const title=(displayTitle(t)||'').trim();
-  if(!title) return null;
+  const title=lyricTitle(displayTitle(t));
+  if(!title) return {data:null,failed:false};
+  const artists=lyricArtists(t.artist);
+  const first=artists[0]||'';
   const album=(t.album||'').replace(/^Unknown Album$/,'').trim();
+  const dur=(t.duration&&isFinite(t.duration)&&t.duration>0)?t.duration:0;
+  let failed=false;
 
-  // Exact match first (best chance of correct synced lyrics)
-  const qs=new URLSearchParams({track_name:title});
-  if(artist) qs.set('artist_name',artist);
-  if(album) qs.set('album_name',album);
-  if(t.duration&&isFinite(t.duration)&&t.duration>0) qs.set('duration',Math.round(t.duration));
-  try{
-    const r=await fetch('https://lrclib.net/api/get?'+qs.toString());
-    if(r.ok){
-      const d=await r.json();
-      if(d && (d.syncedLyrics||d.plainLyrics)) return d;
+  const j=async url=>{
+    try{ const r=await fetch(url); if(!r.ok) return null; return await r.json(); }
+    catch(e){ failed=true; return null; }
+  };
+
+  // 1. exact lookup — only worth it with one clean artist
+  if(first){
+    const qs=new URLSearchParams({track_name:title,artist_name:first});
+    if(album) qs.set('album_name',album);
+    if(dur) qs.set('duration',Math.round(dur));
+    const d=await j('https://lrclib.net/api/get?'+qs);
+    if(d&&(d.syncedLyrics||d.plainLyrics)) return {data:d,failed:false};
+  }
+  // 2..4. progressively looser searches, each filtered to the right song
+  const variants=[title];
+  const joined=title.replace(/\s+/g,'');                 // "Butta Bomma" -> "ButtaBomma"
+  if(joined!==title&&title.includes(' ')) variants.push(joined);
+  const queries=[];
+  for(const v of variants){
+    if(first) queries.push('track_name='+encodeURIComponent(v)+'&artist_name='+encodeURIComponent(first));
+    queries.push('track_name='+encodeURIComponent(v));
+  }
+  queries.push('q='+encodeURIComponent((first+' '+title).trim()));
+  let fallbackPlain=null;
+  for(const q of queries){
+    const arr=await j('https://lrclib.net/api/search?'+q);
+    const hit=pickLrclib(arr,title,artists,dur);
+    if(hit){
+      if(hit.syncedLyrics) return {data:hit,failed:false};
+      if(!fallbackPlain) fallbackPlain=hit;               // keep looking for a synced one
     }
-  }catch(e){ return null; }   // offline / blocked
+  }
+  return {data:fallbackPlain,failed:fallbackPlain?false:failed};
+}
 
-  // Fuzzy search fallback; prefer a result that has synced lyrics.
+// Plain-text fallback for songs LRCLIB lacks (mostly Telugu/Hindi), via the Worker.
+async function proxyLyrics(t){
+  const title=lyricTitle(displayTitle(t)); if(!title) return {data:null,failed:false};
+  const qs=new URLSearchParams({title,artist:lyricArtists(t.artist).slice(0,3).join(', ')});
   try{
-    const q=(artist?artist+' ':'')+title;
-    const r=await fetch('https://lrclib.net/api/search?q='+encodeURIComponent(q));
-    if(!r.ok) return null;
-    const arr=await r.json();
-    if(!Array.isArray(arr)||!arr.length) return null;
-    return arr.find(x=>x.syncedLyrics) || arr.find(x=>x.plainLyrics) || null;
-  }catch(e){ return null; }
+    const r=await fetch(LYRICS_PROXY+'?'+qs);
+    if(!r.ok) return {data:null,failed:r.status>=500};
+    const d=await r.json();
+    return d&&d.found&&d.lyrics?{data:d,failed:false}:{data:null,failed:false};
+  }catch(e){ return {data:null,failed:true}; }
 }
 
 // Resolve lyrics for a track: {synced:[{t,text}]|null, plain:string|null, source}
@@ -1552,22 +1625,37 @@ async function getLyrics(t){
   // 2. Previously fetched and cached.
   const c=await cachedLyrics(t);
   if(c){
-    if(c.text===''){ return {synced:null,plain:null,source:'none'}; }  // known-missing
-    const synced=c.sync?parseLRC(c.text):null;
-    return {synced,plain:synced?null:c.text,source:'cache'};
+    if(c.text===''){
+      // A remembered miss expires, so newly added songs/sources get another try.
+      if(Date.now()-(c.at||0)<3*24*3600*1000) return {synced:null,plain:null,source:'none'};
+    }else{
+      const synced=c.sync?parseLRC(c.text):null;
+      return {synced,plain:synced?null:c.text,source:c.source||'cache'};
+    }
   }
   // 3. Network.
   if(!navigator.onLine) return {synced:null,plain:null,source:'offline'};
-  const d=await lrclibFetch(t);
-  if(!d || (!d.syncedLyrics && !d.plainLyrics)){
-    await cacheLyrics(t,{text:'',sync:false});   // remember the miss
-    return {synced:null,plain:null,source:'none'};
+
+  const lr=await lrclibFetch(t);
+  if(lr.data&&lr.data.syncedLyrics){
+    await cacheLyrics(t,{text:lr.data.syncedLyrics,sync:true,source:'lrclib'});
+    return {synced:parseLRC(lr.data.syncedLyrics),plain:null,source:'lrclib'};
   }
-  const text=d.syncedLyrics||d.plainLyrics;
-  const sync=!!d.syncedLyrics;
-  await cacheLyrics(t,{text,sync});
-  const synced=sync?parseLRC(text):null;
-  return {synced,plain:synced?null:text,source:'lrclib'};
+  // LRCLIB has no timed lyrics. If it has plain text, use that; only when it has
+  // nothing at all ask the fallback, which covers Telugu/Hindi songs it lacks.
+  const px=lr.data?{data:null,failed:false}:await proxyLyrics(t);
+  if(lr.data&&lr.data.plainLyrics){
+    await cacheLyrics(t,{text:lr.data.plainLyrics,sync:false,source:'lrclib'});
+    return {synced:null,plain:lr.data.plainLyrics,source:'lrclib'};
+  }
+  if(px.data){
+    await cacheLyrics(t,{text:px.data.lyrics,sync:false,source:'jiosaavn'});
+    return {synced:null,plain:px.data.lyrics,source:'jiosaavn'};
+  }
+  // Only remember a miss when every source actually answered.
+  if(lr.failed||px.failed) return {synced:null,plain:null,source:'error'};
+  await cacheLyrics(t,{text:'',sync:false,at:Date.now()});
+  return {synced:null,plain:null,source:'none'};
 }
 
 /* ============================================================
@@ -2729,6 +2817,13 @@ function removeFromQueue(idx){
   saveLastState();
 }
 
+function lyricCredit(source,synced){
+  const from=source==='embedded'?'Lyrics from file'
+           :source==='jiosaavn'?'Lyrics via JioSaavn'
+           :'Lyrics from LRCLIB';
+  return synced?from:from+' (not time-synced)';
+}
+
 function currentTrack(){ return state.qIndex>=0 ? trackById(state.queue[state.qIndex]) : null; }
 
 // One step back: from lyrics to the now playing view, otherwise to the library.
@@ -2769,15 +2864,17 @@ async function loadLyricsForCurrent(force){
       frag.appendChild(d);
     });
     box.appendChild(frag);
-    const src=el('div','lyr-src'); src.textContent=res.source==='embedded'?'Lyrics from file':'Lyrics from LRCLIB';
+    const src=el('div','lyr-src'); src.textContent=lyricCredit(res.source,true);
     box.appendChild(src);
     lyr.idx=-1;
     syncLyrics(true);
   }else if(res.plain){
     box.innerHTML='';
     const p=el('div','lyr-plain'); p.textContent=res.plain; box.appendChild(p);
-    const src=el('div','lyr-src'); src.textContent=res.source==='embedded'?'Lyrics from file':'Lyrics from LRCLIB (not time-synced)';
+    const src=el('div','lyr-src'); src.textContent=lyricCredit(res.source,false);
     box.appendChild(src);
+  }else if(res.source==='error'){
+    box.innerHTML='<div class="lyr-msg">Couldn’t reach the lyrics service.<br>Check your connection and open lyrics again.</div>';
   }else if(res.source==='offline'){
     box.innerHTML='<div class="lyr-msg">You’re offline, so lyrics can’t be looked up.<br>They’ll load next time you have a connection.</div>';
   }else{

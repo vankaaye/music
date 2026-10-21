@@ -151,6 +151,141 @@ async function rebuildManifest(env) {
   return tracks.length;
 }
 
+
+/* ---------- lyrics (JioSaavn fallback) ----------
+ * Browsers cannot call JioSaavn directly (it sends no CORS header), so the app
+ * asks this Worker, which looks the song up and returns plain lyrics. It covers
+ * Telugu and Hindi songs that LRCLIB lacks. This is an unofficial endpoint and
+ * can change or disappear without notice; the app treats it as a best-effort
+ * fallback and works fine without it. Results are cached to keep the load on
+ * the upstream light.
+ */
+
+const SAAVN = 'https://www.jiosaavn.com/api.php?_format=json&_marker=0&ctx=web6dot0&api_version=4';
+const SAAVN_HEADERS = { 'User-Agent': 'Mozilla/5.0 (compatible; music-pwa)', 'Accept': 'application/json' };
+
+function squash(str) {
+  return String(str || '')
+    .replace(/&quot;|&#039;|&amp;/g, ' ')
+    .replace(/[\(\[][^\)\]]*[\)\]]/g, ' ')       // "(From ...)", "[Remix]"
+    .toLowerCase().replace(/[^a-z0-9\u0900-\u097f\u0c00-\u0c7f]+/g, '');
+}
+
+function artistTokens(str) {
+  return String(str || '').toLowerCase()
+    .split(/[,&/]|\bfeat\.?\b|\band\b/).map(s => s.replace(/[^a-z0-9 ]/g, '').trim())
+    .filter(s => s.length > 2);
+}
+
+function decodeEntities(t) {
+  return t.replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ');
+}
+
+function cleanLyrics(raw) {
+  return decodeEntities(String(raw || '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+    .replace(/^\uFEFF/, '')).replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function saavnSearch(q) {
+  const r = await fetch(SAAVN + '&__call=search.getResults&n=8&p=1&q=' + encodeURIComponent(q),
+                        { headers: SAAVN_HEADERS });
+  if (!r.ok) throw new Error('search HTTP ' + r.status);
+  const d = await r.json();
+  return Array.isArray(d.results) ? d.results : [];
+}
+
+function scoreSaavn(res, wantTitle, wantArtists) {
+  const t = squash(decodeEntities(res.title || ''));
+  if (!t || !wantTitle) return -1;
+  let score = 0;
+  if (t === wantTitle) score += 10;
+  else if (t.includes(wantTitle) || wantTitle.includes(t)) score += 5;
+  else return -1;                                   // a different song
+  const hay = (String(res.subtitle || '') + ' ' +
+               String((res.more_info && res.more_info.music) || '')).toLowerCase();
+  for (const a of wantArtists) if (hay.includes(a)) score += 3;
+  if (res.more_info && res.more_info.has_lyrics === 'true') score += 4;
+  return score;
+}
+
+async function findLyrics(title, artist) {
+  const wantTitle = squash(title);
+  const wantArtists = artistTokens(artist);
+  const first = String(artist || '').split(/[,&/]/)[0].trim();
+
+  const seen = new Map();
+  for (const q of [(title + ' ' + first).trim(), title]) {
+    let results = [];
+    try { results = await saavnSearch(q); } catch (e) { continue; }
+    for (const r of results) seen.set(r.id, r);
+    if ([...seen.values()].some(r => scoreSaavn(r, wantTitle, wantArtists) >= 14)) break;
+  }
+
+  const ranked = [...seen.values()]
+    .map(r => ({ r, sc: scoreSaavn(r, wantTitle, wantArtists) }))
+    .filter(x => x.sc >= 0 && x.r.more_info && x.r.more_info.has_lyrics === 'true')
+    .sort((a, b) => b.sc - a.sc)
+    .slice(0, 3);
+
+  for (const { r } of ranked) {
+    try {
+      const res = await fetch(SAAVN + '&__call=lyrics.getLyrics&lyrics_id=' + encodeURIComponent(r.id),
+                              { headers: SAAVN_HEADERS });
+      if (!res.ok) continue;
+      const d = await res.json();
+      const text = cleanLyrics(d.lyrics);
+      if (text.length > 40) {
+        return { lyrics: text, source: 'jiosaavn',
+                 matched: decodeEntities(r.title || '') };
+      }
+    } catch (e) { /* try the next candidate */ }
+  }
+  return null;
+}
+
+async function handleLyrics(request, env, ctx) {
+  // Public so every listener gets lyrics, but only for the app's own origin.
+  const origin = request.headers.get('Origin');
+  if (origin && !allowedOrigins(env).includes('*') && !allowedOrigins(env).includes(origin)) {
+    return json({ error: 'Origin not allowed.' }, 403, request, env);
+  }
+  const url = new URL(request.url);
+  const title = (url.searchParams.get('title') || '').trim().slice(0, 200);
+  const artist = (url.searchParams.get('artist') || '').trim().slice(0, 300);
+  if (!title) return json({ error: 'No title given.' }, 400, request, env);
+
+  const cacheKey = new Request('https://lyrics.cache/' +
+    encodeURIComponent(squash(title) + '|' + artistTokens(artist).join(',')));
+  const cache = (typeof caches !== 'undefined' && caches.default) ? caches.default : null;
+  if (cache) {
+    const hit = await cache.match(cacheKey);
+    if (hit) {
+      const body = await hit.text();
+      return new Response(body, { status: 200, headers: {
+        'Content-Type': 'application/json; charset=utf-8', 'X-Cache': 'hit',
+        ...corsHeaders(request, env) } });
+    }
+  }
+
+  let found = null;
+  try { found = await findLyrics(title, artist); }
+  catch (e) { return json({ error: 'Lookup failed.' }, 502, request, env); }
+
+  if (!found) return json({ ok: true, found: false }, 200, request, env);
+
+  const body = JSON.stringify({ ok: true, found: true, ...found });
+  if (cache) {
+    const store = new Response(body, { headers: {
+      'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=604800' } });
+    if (ctx && ctx.waitUntil) ctx.waitUntil(cache.put(cacheKey, store));
+    else await cache.put(cacheKey, store);
+  }
+  return new Response(body, { status: 200, headers: {
+    'Content-Type': 'application/json; charset=utf-8', ...corsHeaders(request, env) } });
+}
+
 /* ---------- routes ---------- */
 
 async function handleUpload(request, env) {
@@ -239,7 +374,7 @@ async function handleList(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '') || '/';
 
@@ -249,6 +384,10 @@ export default {
 
     if (path === '/' || path === '/api') {
       return json({ ok: true, service: 'music-admin' }, 200, request, env);
+    }
+
+    if (path === '/lyrics' && request.method === 'GET') {
+      return handleLyrics(request, env, ctx);
     }
 
     if (!path.startsWith('/api/')) {
