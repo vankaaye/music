@@ -89,8 +89,11 @@ device.
   unofficial and may change or stop working; the app is fine without it. A
   failed lookup caused by the network is never remembered as "no lyrics", and a
   genuine miss is retried after three days.
-- **Lyrics** — a lyrics button in Now Playing shows time-synced lyrics with the
-  current line highlighted and auto-scrolled, Apple Music style; tap any line to
+- **Lyrics** — the lyrics button flips the album cover over to show time-synced
+  lyrics on its back, in the same square, with the current line highlighted and
+  scrolled into the middle, Apple Music style. They scroll by touch, wheel or
+  keyboard, auto-follow pauses for a few seconds while you scroll and then
+  resumes, and the cover is larger on a desktop window; tap any line to
   jump to it. Lyrics come from the file's own embedded ID3 tags first, then from
   [LRCLIB](https://lrclib.net) (free, no account). Fetched lyrics are cached on
   the device, so they work offline afterwards. Untimed lyrics are shown as plain

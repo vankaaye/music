@@ -247,10 +247,14 @@ input{font-family:inherit}
 #np .scrim{position:absolute;inset:0;background:linear-gradient(rgba(0,0,0,.35),rgba(0,0,0,.7));z-index:0}
 #np .np-inner{
   position:relative;z-index:1;flex:1;display:flex;flex-direction:column;
+  /* A flex child will not shrink below its content unless told it may. Without
+     min-height:0 a long lyric stretched this column past the screen, pushed the
+     controls off the bottom, and left the lyrics with no box to scroll inside. */
+  min-height:0;overflow:hidden;
   padding:calc(var(--sat) + 8px) calc(24px + var(--sar)) calc(var(--sab) + 20px) calc(24px + var(--sal));
   /* Without this the scrubber and controls stretch the full width of a desktop
      window while the artwork stays small, which looks broken. */
-  width:100%;max-width:560px;margin:0 auto;
+  width:100%;max-width:620px;margin:0 auto;
 }
 .np-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex:none}
 .np-head-sp{width:86px;flex:none}
@@ -262,15 +266,42 @@ input{font-family:inherit}
 .np-back:active{background:rgba(255,255,255,.16)}
 .np-grip{width:38px;height:5px;border-radius:3px;background:rgba(255,255,255,.4);margin:0 auto;flex:1;max-width:38px}
 .np-art-wrap{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:12px 0}
-#npArt{
-  width:min(78vw,340px);aspect-ratio:1;border-radius:12px;background:var(--panel-2);
-  box-shadow:0 20px 50px rgba(0,0,0,.5);overflow:hidden;position:relative;
+/* The cover is a card with two faces: artwork in front, lyrics behind. Sized
+   from both width and height so it stays square and leaves room for the
+   controls on a short phone, and grows on a desktop window. */
+.np-art-wrap{perspective:1400px;-webkit-perspective:1400px}
+.flip{
+  --flipw:min(78vw,46dvh,460px);
+  width:var(--flipw);aspect-ratio:1;position:relative;
   transform:scale(.82);transition:transform .35s cubic-bezier(.2,.8,.2,1);
 }
-#np.is-playing #npArt{transform:scale(1)}
-#npArt img{width:100%;height:100%;object-fit:cover}
+#np.is-playing .flip,.flip.flipped{transform:scale(1)}
+.flip-inner{
+  position:absolute;inset:0;transform-style:preserve-3d;-webkit-transform-style:preserve-3d;
+  transition:transform .6s cubic-bezier(.3,.7,.2,1);
+}
+.flip.flipped .flip-inner{transform:rotateY(180deg)}
+/* Once the flip has landed, drop out of 3D altogether. The back face is upright
+   either way, so nothing visibly changes — but a scroll area inside a rotated
+   3D layer is unreliable for touch in mobile Safari, and a flat one is not. */
+.flip.settled .flip-inner{transition:none;transform:none;transform-style:flat;-webkit-transform-style:flat}
+.flip.settled .flip-back{transform:none}
+.flip.settled #npArt{visibility:hidden}
+.flip-face{
+  position:absolute;inset:0;border-radius:12px;overflow:hidden;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  box-shadow:0 20px 50px rgba(0,0,0,.5);
+}
+#npArt{background:var(--panel-2)}
+#npArt img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #npArt .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 #npArt .ph svg{width:72px;height:72px;fill:var(--text-2)}
+.flip-back{
+  transform:rotateY(180deg);
+  background:rgba(24,24,26,.72);
+  backdrop-filter:blur(28px) saturate(160%);-webkit-backdrop-filter:blur(28px) saturate(160%);
+  border:1px solid rgba(255,255,255,.1);
+}
 /* queue — Apple-style "Playing Next" */
 #npQueue{flex:1;min-height:0;display:flex;flex-direction:column;margin:4px 0}
 .q-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:2px 0 10px;scrollbar-width:none}
@@ -301,17 +332,20 @@ input{font-family:inherit}
 @media (prefers-reduced-motion:reduce){.q-playing-bars i{animation:none}}
 
 /* lyrics */
-#npLyrics{flex:1;min-height:0;display:flex;flex-direction:column;margin:4px 0}
+#npLyrics{display:flex;flex-direction:column}
 .lyr-scroll{
-  flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
-  padding:34% 2px 46%;
+  position:absolute;inset:0;           /* fills the card; positioned so offsetTop is relative to it */
+  overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  touch-action:pan-y;                   /* vertical swipes scroll this, never the sheet */
+  font-size:clamp(16px,calc(var(--flipw) * .058),26px);
+  padding:34% 16px 58%;
   scrollbar-width:none;
   -webkit-mask-image:linear-gradient(transparent,#000 12%,#000 78%,transparent);
   mask-image:linear-gradient(transparent,#000 12%,#000 78%,transparent);
 }
 .lyr-scroll::-webkit-scrollbar{display:none}
 .lyr-line{
-  font-size:23px;font-weight:800;line-height:1.26;letter-spacing:-.01em;
+  font-size:1em;font-weight:800;line-height:1.26;letter-spacing:-.01em;
   color:rgba(255,255,255,.32);
   padding:9px 2px;cursor:pointer;
   overflow-wrap:break-word;word-break:break-word;hyphens:auto;
@@ -319,9 +353,9 @@ input{font-family:inherit}
   transform-origin:left center;
 }
 .lyr-line.done{color:rgba(255,255,255,.42)}
-.lyr-line.active{color:#fff;transform:scale(1.04)}
+.lyr-line.active{color:#fff;transform:scale(1.02)}
 .lyr-line.blank{padding:3px 0}
-.lyr-plain{font-size:17px;line-height:1.65;color:rgba(255,255,255,.82);white-space:pre-wrap;font-weight:500;padding:2px}
+.lyr-plain{font-size:.82em;line-height:1.65;color:rgba(255,255,255,.82);white-space:pre-wrap;font-weight:500;padding:2px}
 .lyr-msg{font-size:15px;color:rgba(255,255,255,.55);text-align:center;padding:26px 12px;line-height:1.5}
 .lyr-msg .sp{width:26px;height:26px;border:2.5px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;margin:0 auto 12px;animation:spin 1s linear infinite}
 .lyr-src{font-size:11px;color:rgba(255,255,255,.35);text-align:center;padding:14px 0 4px;letter-spacing:.02em}
@@ -332,7 +366,7 @@ input{font-family:inherit}
 .lyr-toggle svg{width:21px;height:21px;fill:rgba(255,255,255,.9)}
 .lyr-toggle.on{background:var(--accent)}
 .lyr-toggle.on svg{fill:#fff}
-@media (prefers-reduced-motion:reduce){ .lyr-line{transition:none} }
+@media (prefers-reduced-motion:reduce){ .lyr-line,.flip-inner{transition:none} }
 .np-titles .t{font-size:22px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .np-titles .s{font-size:18px;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 
@@ -510,7 +544,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 @media (prefers-reduced-motion:reduce){
   #mini,#np,#npArt,.segmented button{transition:none!important}
   .spinner{animation:none}
-  #npArt{transform:scale(1)!important}
+  .flip{transform:scale(1)!important}
 }
 </style>
 </head>
@@ -574,9 +608,13 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
         <div class="np-head-sp"></div>
       </div>
       <div class="np-art-wrap">
-        <div id="npArt"><div class="ph"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div></div>
+        <div class="flip" id="npFlip">
+          <div class="flip-inner">
+            <div class="flip-face" id="npArt"><div class="ph"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div></div>
+            <div class="flip-face flip-back" id="npLyrics"><div class="lyr-scroll" id="lyrScroll"></div></div>
+          </div>
+        </div>
       </div>
-      <div id="npLyrics" class="hidden"><div class="lyr-scroll" id="lyrScroll"></div></div>
       <div id="npQueue" class="hidden"><div class="q-scroll" id="qScroll"></div></div>
       <div class="np-titles">
         <div class="tt-block">
@@ -717,7 +755,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 // The shared library everyone opens by default — the public bucket's manifest.
 const DEFAULT_LIBRARY='https://pub-80c11d7cadda4d108efd1e66727be54e.r2.dev/library.json';
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 31';
+const BUILD='build 32';
 
 /* ============================================================
    Small helpers
@@ -2712,12 +2750,32 @@ function setupAirplay(){
 ============================================================ */
 const lyr={open:false,synced:null,plain:null,forId:null,idx:-1,userScroll:0,loading:false};
 
+function setFlip(on){
+  const f=$('#npFlip'), inner=f.querySelector('.flip-inner');
+  clearTimeout(f._settle);
+  if(on){
+    f.classList.add('flipped');
+    f._settle=setTimeout(()=>f.classList.add('settled'),720);   // after the 0.6s turn
+  }else{
+    if(f.classList.contains('settled')){
+      // Step back into the (visually identical) rotated state with transitions
+      // off, so un-flipping starts from upright rather than from flat-front.
+      inner.style.transition='none';
+      f.classList.remove('settled');
+      void inner.offsetWidth;
+      inner.style.transition='';
+    }
+    f.classList.remove('flipped');
+  }
+}
+
 function setLyricsOpen(on){
   lyr.open=on;
   if(on) qOpen=false;                       // one panel at a time
-  $('#npLyrics').classList.toggle('hidden',!on);
+  // The cover flips over to show lyrics on its back; no separate page.
+  setFlip(on);
   $('#npQueue').classList.toggle('hidden',!qOpen);
-  $('.np-art-wrap').classList.toggle('hidden',on||qOpen);
+  $('.np-art-wrap').classList.toggle('hidden',qOpen);
   $('#btnLyrics').classList.toggle('on',on);
   $('#btnQueue').classList.toggle('on',qOpen);
   $('#btnLyrics').setAttribute('aria-label',on?'Hide lyrics':'Show lyrics');
@@ -2733,8 +2791,8 @@ function setQueueOpen(on){
   qOpen=on;
   if(on) lyr.open=false;                    // one panel at a time
   $('#npQueue').classList.toggle('hidden',!on);
-  $('#npLyrics').classList.toggle('hidden',!lyr.open);
-  $('.np-art-wrap').classList.toggle('hidden',on||lyr.open);
+  setFlip(lyr.open);
+  $('.np-art-wrap').classList.toggle('hidden',on);
   $('#btnQueue').classList.toggle('on',on);
   $('#btnLyrics').classList.toggle('on',lyr.open);
   $('#btnQueue').setAttribute('aria-label',on?'Hide queue':'Playing next');
@@ -3056,7 +3114,8 @@ function wireEvents(){
   // lyrics / queue
   $('#btnLyrics').onclick=()=>setLyricsOpen(!lyr.open);
   $('#btnQueue').onclick=()=>setQueueOpen(!qOpen);
-  $('#lyrScroll').addEventListener('scroll',()=>{ lyr.userScroll=Date.now(); },{passive:true});
+  ['wheel','touchstart','touchmove','pointerdown','keydown'].forEach(ev=>
+    $('#lyrScroll').addEventListener(ev,()=>{ lyr.userScroll=Date.now(); },{passive:true}));
   $('#scrub').addEventListener('change',()=>syncLyrics(true));
 
   // now playing transport
@@ -3107,6 +3166,8 @@ function wireEvents(){
   // swipe down to dismiss NP
   const grip=$('#npGrip'), npInner=$('.np-inner');
   $('#np').addEventListener('touchstart',e=>{
+    // Never treat a swipe inside the lyrics or queue as "drag the sheet down".
+    if(e.target.closest&&e.target.closest('.lyr-scroll,.q-scroll')) return;
     // only start drag from top region / grip
     const y=e.touches[0].clientY;
     const rect=$('#np').getBoundingClientRect();
