@@ -56,6 +56,13 @@ device.
   footer reports what is on-device versus streaming, and going offline shows
   how many tracks are ready. Tap the check to free the space again — the track
   stays in the library and can be re-downloaded or streamed.
+- **Volume** — iOS keeps volume out of web pages, so on the phone the slider is
+  replaced by a line pointing at the hardware buttons. While audio is handed off
+  to an AirPlay receiver the phone is no longer the output — its buttons then
+  move the ringer, not the music — so the slider appears and drives the element
+  volume, which Safari can forward to the receiver. Availability is re-checked
+  on every route change, and the AirPlay picker's own per-device slider is named
+  as the guaranteed fallback. Desktop keeps an ordinary working slider.
 - **AirPlay / device output** — in Safari the Now Playing view offers Apple's
   own AirPlay picker, with the button lit while audio is routed to a device.
   Other browsers get the Remote Playback picker (e.g. Cast) when a receiver is

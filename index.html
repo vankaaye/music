@@ -364,6 +364,9 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .np-vol{display:flex;align-items:center;gap:10px;flex:1;min-width:0}
 .np-vol svg{width:18px;height:18px;fill:rgba(255,255,255,.6);flex:none}
 #np.no-vol .np-vol{display:none}
+.np-volhint{flex:1;min-width:0;display:flex;align-items:center;gap:8px;
+  font-size:12px;color:rgba(255,255,255,.55);line-height:1.3}
+.np-volhint svg{width:15px;height:15px;fill:rgba(255,255,255,.4);flex:none}
 /* AirPlay / device routing */
 .ap-btn{width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:10px;margin-left:auto}
 .ap-btn svg{width:23px;height:23px;fill:rgba(255,255,255,.85)}
@@ -594,6 +597,10 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
           <input type="range" class="bar" id="vol" min="0" max="100" value="100">
           <svg viewBox="0 0 24 24"><path d="M5 9v6h4l5 5V4L9 9H5zm11.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>
         </div>
+        <div class="np-volhint hidden" id="npVolHint">
+          <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm.9 15h-1.8v-1.8h1.8V17zm0-3.2h-1.8V7h1.8v6.8z"/></svg>
+          <span></span>
+        </div>
         <button id="btnAirplay" class="ap-btn hidden" aria-label="AirPlay">
           <svg viewBox="0 0 24 24">
             <path d="M12 13.6L17.7 20.5H6.3L12 13.6z"/>
@@ -680,7 +687,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 25';
+const BUILD='build 26';
 
 /* ============================================================
    Small helpers
@@ -2205,6 +2212,35 @@ function isIOS(){
          // iPadOS 13+ reports itself as a Mac; touch points give it away.
          (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
 }
+let volHintToasted=false;
+
+function airplayActive(){
+  try{ return !!audio.webkitCurrentPlaybackTargetIsWireless; }catch(e){ return false; }
+}
+
+/* iOS ignores a media element's volume for playback on the phone itself — that
+   is hardware-only. While audio is handed off to an AirPlay receiver the phone
+   is no longer the output, so its volume buttons fall back to the ringer and do
+   nothing to the music; the element's volume is then the only lever the page
+   has, and Safari can forward it to the receiver. So the control is offered
+   exactly when it stands a chance, and re-evaluated on every route change
+   rather than decided once at launch. */
+function volumeUIAvailable(){
+  return isIOS() ? airplayActive() : volumeControlWorks();
+}
+
+function updateVolumeUI(){
+  const show=volumeUIAvailable();
+  $('#np').classList.toggle('no-vol',!show);
+  const hint=$('#npVolHint');
+  const needHint=isIOS() && !show;
+  hint.classList.toggle('hidden',!needHint);
+  if(needHint){
+    hint.querySelector('span').textContent =
+      'Use your phone’s volume buttons — iOS keeps volume out of web apps.';
+  }
+}
+
 function volumeControlWorks(){
   if(isIOS()) return false;
   try{
@@ -2233,6 +2269,7 @@ function setupAirplay(){
       // useless to it. Swap to the track's real URL while routing, and back to
       // the local copy afterwards.
       if(on) preferStreamForAirplay();
+      updateVolumeUI();          // the slider becomes usable only while routed
     });
     btn.onclick=()=>{
       try{ audio.webkitShowPlaybackTargetPicker(); }
@@ -2463,7 +2500,7 @@ function syncLyrics(force){
 /* ============================================================
    Now Playing sheet open/close + swipe
 ============================================================ */
-function openNP(){ if(state.qIndex<0)return; state.npOpen=true; $('#np').classList.add('show'); $('#np').setAttribute('aria-hidden','false'); }
+function openNP(){ if(state.qIndex<0)return; state.npOpen=true; updateVolumeUI(); $('#np').classList.add('show'); $('#np').setAttribute('aria-hidden','false'); }
 function closeNP(){ state.npOpen=false; $('#np').classList.remove('show'); $('#np').setAttribute('aria-hidden','true'); $('#np').style.transform=''; }
 
 let dragStartY=null,dragging=false;
@@ -2645,6 +2682,12 @@ function wireEvents(){
   // volume
   $('#vol').addEventListener('input',e=>{
     state.volume=e.target.value/100; audio.volume=state.volume;
+    // Safari may or may not forward this to the receiver; say once where the
+    // guaranteed control is, rather than leaving a slider that might do nothing.
+    if(isIOS() && airplayActive() && !volHintToasted){
+      volHintToasted=true;
+      showToast('If the level doesn’t change, tap the AirPlay button — the picker has a volume slider for each device.');
+    }
   });
   $('#vol').addEventListener('change',saveLastState);
 
@@ -2703,7 +2746,7 @@ async function boot(){
 
   setupAirplay();
 
-  if(!volumeControlWorks()) $('#np').classList.add('no-vol');
+  updateVolumeUI();
 
   if(dbAvailable){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
