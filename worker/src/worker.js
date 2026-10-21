@@ -9,6 +9,12 @@
 
 const AUDIO_RE = /\.(mp3|m4a|aac|flac|wav|ogg|oga|opus|wma)$/i;
 const MANIFEST = 'library.json';
+const COVER_MAX = 5 * 1024 * 1024;
+
+async function sha1(text) {
+  const buf = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 /* ---------- CORS ---------- */
 
@@ -125,6 +131,7 @@ async function rebuildManifest(env) {
     const dur = parseFloat(m.duration);
     if (dur > 0) t.duration = Math.round(dur * 10) / 10;
     if (o.size) t.size = o.size;
+    if (m.cover) t.cover = encodeKey(m.cover);
     return t;
   });
 
@@ -170,6 +177,19 @@ async function handleUpload(request, env) {
   }
   if (meta.duration) custom.duration = String(meta.duration);
 
+  // Cover art arrives as its own part (the browser already extracted it from the
+  // file's tags). Keep it as a small image object so readers fetch a few KB
+  // instead of range-reading a whole song to find it.
+  const cover = form.get('cover');
+  if (cover && typeof cover !== 'string' && cover.size > 0 && cover.size <= COVER_MAX) {
+    const ext = /png/i.test(cover.type) ? 'png' : /webp/i.test(cover.type) ? 'webp' : 'jpg';
+    const ckey = 'covers/' + await sha1(key) + '.' + ext;
+    await env.MUSIC.put(ckey, cover.stream(), {
+      httpMetadata: { contentType: cover.type || 'image/jpeg', cacheControl: 'public, max-age=86400' },
+    });
+    custom.cover = ckey;
+  }
+
   await env.MUSIC.put(key, file.stream(), {
     httpMetadata: { contentType: file.type || 'audio/mpeg' },
     customMetadata: custom,
@@ -187,7 +207,15 @@ async function handleDelete(request, env) {
   if (!keys.length) return json({ error: 'No key given.' }, 400, request, env);
 
   const cleaned = keys.map(k => safeKey(k)).filter(k => k && k !== MANIFEST);
-  for (const k of cleaned) await env.MUSIC.delete(k);
+  for (const k of cleaned) {
+    // Look the cover up first, so deleting a song leaves no orphaned image.
+    try {
+      const head = await env.MUSIC.head(k);
+      const ck = head && head.customMetadata && head.customMetadata.cover;
+      if (ck && ck.startsWith('covers/')) await env.MUSIC.delete(ck);
+    } catch (e) {}
+    await env.MUSIC.delete(k);
+  }
 
   const count = await rebuildManifest(env);
   return json({ ok: true, deleted: cleaned, tracks: count }, 200, request, env);

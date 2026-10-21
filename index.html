@@ -717,7 +717,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 // The shared library everyone opens by default — the public bucket's manifest.
 const DEFAULT_LIBRARY='https://pub-80c11d7cadda4d108efd1e66727be54e.r2.dev/library.json';
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 29';
+const BUILD='build 30';
 
 /* ============================================================
    Small helpers
@@ -1330,7 +1330,7 @@ async function manifestList(cfg){
         if(!u) continue;
         push(u,{title:it.title||null,artist:it.artist||null,album:it.album||null,
                 size:Number(it.size)||0,duration:Number(it.duration)||0,
-                coverUrl:it.cover||it.artwork||null});
+                coverUrl:(it.cover||it.artwork)?abs(it.cover||it.artwork):null});
       }
     }
   }else{
@@ -1360,14 +1360,45 @@ async function manifestList(cfg){
 
 // Fetch just the head of a remote file and parse ID3 from it.
 async function parseID3Remote(url,cfg){
+  const none={title:null,artist:null,album:null,cover:null,lyrics:null,failed:true};
   const auth=authHeader(cfg);
-  const headers={'Range':'bytes=0-262143'};
-  if(auth) headers['Authorization']=auth;
-  let res;
-  try{ res=await fetch(url,{headers}); }catch(e){ return {title:null,artist:null,album:null,cover:null}; }
-  if(!(res.ok||res.status===206)) return {title:null,artist:null,album:null,cover:null};
-  const buf=await res.arrayBuffer();
+  const get=async end=>{
+    const headers={'Range':'bytes=0-'+end};
+    if(auth) headers['Authorization']=auth;
+    let res;
+    try{ res=await fetch(url,{headers}); }catch(e){ return null; }
+    if(!(res.ok||res.status===206)) return null;
+    return new Uint8Array(await res.arrayBuffer());
+  };
+  let buf=await get(262143);
+  if(!buf) return none;
+  // A cover often pushes the tag past 256 KB, and a truncated tag loses it.
+  // The header says how big the whole tag is, so fetch exactly that much.
+  if(buf.length>=10&&buf[0]===0x49&&buf[1]===0x44&&buf[2]===0x33){
+    const total=10+((buf[6]<<21)|(buf[7]<<14)|(buf[8]<<7)|buf[9]);
+    if(total>buf.length&&total<=8*1024*1024){
+      const full=await get(total-1);
+      if(full) buf=full;
+    }
+  }
   return parseID3(new Blob([buf]));
+}
+
+// Fetch a track's cover: the manifest's own cover image if it has one,
+// otherwise the artwork embedded in the file's tag.
+async function fetchRemoteCover(f){
+  if(f.coverUrl){
+    try{
+      const r=await fetch(f.coverUrl);
+      if(r.ok){ const b=await r.blob(); if(b.size) return {blob:b,definitive:true}; }
+    }catch(e){}
+  }
+  try{
+    const t=await parseID3Remote(f.url,serverCfg);
+    // "failed" means we could not reach the file at all — not that it has no
+    // artwork — so that must not be remembered as a final answer.
+    return {blob:t.cover||null, definitive:!t.failed};
+  }catch(e){ return {blob:null,definitive:false}; }
 }
 
 async function connectAndSync(cfg){
@@ -1401,17 +1432,32 @@ async function syncRemote(opts){
     // range request — some static hosts don't support Range on every object.
     const described=!!(f.title&&f.artist);
     if(!described){ try{ tags=await parseID3Remote(f.url,serverCfg); }catch(e){} }
+    // Titles can come from the manifest, but artwork never does unless it
+    // carries a cover image — so go and find it.
+    let cover=tags.cover||null, definitive=!!cover||!described&&!tags.failed;
+    if(!cover){ const r=await fetchRemoteCover(f); cover=r.blob; definitive=r.definitive; }
     const derived=deriveTitleArtist(
       {title:f.title||tags.title, artist:f.artist||tags.artist}, f.name);
     const rec={ id:'r_'+hashStr(f.url), remote:true, url:f.url, name:f.name, size:f.size||0,
       title:derived.title, artist:derived.artist,
       album:stripJunk(f.album)||stripJunk(tags.album)||'Unknown Album',
-      duration:f.duration||0, cover:tags.cover||null,
+      duration:f.duration||0, cover, coverChecked:definitive,
       lyrics:tags.lyrics||null, audio:null };
     state.tracks.push(rec);
     if(dbAvailable){ try{ await dbPutTrack(rec); }catch(e){} }
     existing.add(f.url); added++;
     if(i%4===0) render();
+  }
+  // Songs synced earlier were never checked for artwork. Look once, then
+  // remember, so this never repeats for tracks that genuinely have none.
+  const byUrl=new Map(files.map(f=>[f.url,f]));
+  for(const t of state.tracks){
+    if(!t.remote||t.cover||t.coverChecked) continue;
+    const f=byUrl.get(t.url); if(!f) continue;
+    const r=await fetchRemoteCover(f);
+    if(r.blob) t.cover=r.blob;
+    if(r.definitive) t.coverChecked=true;
+    if(dbAvailable){ try{ await dbPutTrack(t); }catch(e){} }
   }
   // prune remote tracks that no longer exist on the server
   const removed=[];
@@ -1565,12 +1611,13 @@ async function adminCall(path,opts){
 }
 
 // Upload one file with progress. fetch() cannot report upload progress, so XHR.
-function adminUpload(file,meta,onProgress){
+function adminUpload(file,meta,onProgress,cover){
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
     fd.append('file',file,file.name);
     fd.append('name',filePath(file));   // keep subfolders so same-named tracks don't collide
     fd.append('meta',JSON.stringify(meta||{}));
+    if(cover&&cover.size) fd.append('cover',cover,'cover');
     const xhr=new XMLHttpRequest();
     xhr.open('POST',adminURL(adminCfg.base,'/api/upload'));
     xhr.setRequestHeader('X-Admin-Passcode',adminCfg.pass);
@@ -1728,9 +1775,10 @@ async function adminAddFiles(fileList){
     if(f.size>95*1024*1024){ failed++; admError(f.name+' is over the 100 MB upload limit.'); continue; }
     // Read the tags here so everyone gets good metadata without each device
     // having to range-request the file after syncing.
-    let meta={};
+    let meta={}, coverBlob=null;
     try{
       const tags=await parseID3(f);
+      coverBlob=tags.cover||null;
       const d=deriveTitleArtist(tags,f.name);
       meta.title=d.title;
       if(d.artist&&d.artist!=='Unknown Artist') meta.artist=d.artist;
@@ -1738,7 +1786,7 @@ async function adminAddFiles(fileList){
       const dur=await readDuration(f); if(dur) meta.duration=Math.round(dur*10)/10;
     }catch(e){}
     try{
-      await adminUpload(f,meta,fr=>{ if(bar) bar.style.width=Math.round(fr*100)+'%'; });
+      await adminUpload(f,meta,fr=>{ if(bar) bar.style.width=Math.round(fr*100)+'%'; },coverBlob);
       done++;
     }catch(e){ failed++; admError(e.message); }
     if(bar) bar.style.width='0%';
