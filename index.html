@@ -713,8 +713,10 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 <script>
 "use strict";
 (function(){
+// The shared library everyone opens by default — the public bucket's manifest.
+const DEFAULT_LIBRARY='https://pub-80c11d7cadda4d108efd1e66727be54e.r2.dev/library.json';
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 27';
+const BUILD='build 28';
 
 /* ============================================================
    Small helpers
@@ -1212,6 +1214,7 @@ function libBytes(){
    is identical on every device that connects to the same server.
 ============================================================ */
 let serverCfg=null;   // { type:'link'|'webdav', base, path, user, pass }
+let autoSyncPending=false;
 
 async function loadServerCfg(){
   if(!dbAvailable) return null;
@@ -1948,6 +1951,7 @@ function cloudBar(){
 
 async function disconnectServer(){
   await clearServerCfg();
+  if(dbAvailable){ try{ await dbSetMeta('defaultDeclined',{v:1}); }catch(e){} }
   const removed=state.tracks.filter(t=>t.remote).map(t=>t.id);
   state.tracks=state.tracks.filter(t=>!t.remote);
   for(const id of removed){ revokeCover(id); if(dbAvailable){ try{ await dbDeleteTrack(id); }catch(e){} } }
@@ -2867,6 +2871,9 @@ function wireEvents(){
   $('#optFiles').onclick=()=>{ closeAddSheet(); $('#fileInput').click(); };
   $('#optFolder').onclick=()=>{ closeAddSheet(); $('#folderInput').click(); };
   $('#optServer').onclick=()=>{ closeAddSheet(); openServerModal(); };
+  $('#optAdmin').onclick=()=>{ closeAddSheet(); openAdminModal(); };
+  $('#adminBackdrop').onclick=closeAdminModal;
+  $('#adminFiles').onchange=e=>{ adminAddFiles(e.target.files); e.target.value=''; };
   $('#optClean').onclick=async()=>{ closeAddSheet();
     const n=await cleanLibraryNames();
     showToast(n?('Cleaned up '+n+' track name'+(n!==1?'s':'')+'.'):'Nothing to clean — names look fine.'); };
@@ -3005,6 +3012,16 @@ async function boot(){
   if(dbAvailable){
     try{ state.tracks=await dbGetAllTracks(); }catch(e){ state.tracks=[]; }
     await loadServerCfg();
+    await loadAdminCfg();
+    // First launch with nothing connected: join the shared library, unless the
+    // person already chose to disconnect from it.
+    if(!serverCfg){
+      let declined=null; try{ declined=await dbGetMeta('defaultDeclined'); }catch(e2){}
+      if(!declined||!declined.v){
+        await saveServerCfg({type:'link',base:DEFAULT_LIBRARY,path:'',user:'',pass:''});
+        autoSyncPending=true;
+      }
+    }
   }
   // One-time pass over a library imported before names were being cleaned.
   if(dbAvailable && state.tracks.length){
@@ -3020,6 +3037,17 @@ async function boot(){
   reflectShuffleRepeat();
   render();
   if(dbAvailable) await restoreLastState();
+
+  // Pull the latest library.json on every launch, quietly — a song added by the
+  // admin shows up for everyone without anyone tapping Refresh.
+  if(serverCfg && navigator.onLine){
+    _syncing=true; render();
+    syncRemote({withOverlay:false}).then(r=>{
+      _syncing=false; render();
+      if(autoSyncPending && r && !r.ok) showToast('Couldn’t reach the shared library: '+r.error);
+      autoSyncPending=false;
+    }).catch(()=>{ _syncing=false; render(); });
+  }
 
   // register service worker (only over http/https)
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
