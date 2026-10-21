@@ -641,8 +641,8 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 
   <div id="dropHint" class="hidden">Drop to add music</div>
 
-  <input type="file" id="fileInput" accept="audio/*" multiple class="hidden">
-  <input type="file" id="folderInput" accept="audio/*" multiple webkitdirectory directory class="hidden">
+  <input type="file" id="fileInput" multiple class="hidden">
+  <input type="file" id="folderInput" multiple webkitdirectory directory class="hidden">
 
   <!-- Add-source action sheet -->
   <div id="sheet" class="hidden" role="dialog" aria-label="Add music">
@@ -663,7 +663,8 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
     <div class="modal-backdrop" id="adminBackdrop"></div>
     <div class="modal-card" id="adminCard"></div>
   </div>
-  <input type="file" id="adminFiles" accept="audio/*" multiple class="hidden">
+  <input type="file" id="adminFiles" multiple class="hidden">
+  <input type="file" id="adminFolder" multiple webkitdirectory directory class="hidden">
 
   <!-- Server (WebDAV / TrueNAS) connection modal -->
   <div id="serverModal" class="hidden" role="dialog" aria-label="Connect server">
@@ -716,7 +717,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 // The shared library everyone opens by default — the public bucket's manifest.
 const DEFAULT_LIBRARY='https://pub-80c11d7cadda4d108efd1e66727be54e.r2.dev/library.json';
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 28';
+const BUILD='build 29';
 
 /* ============================================================
    Small helpers
@@ -1568,7 +1569,7 @@ function adminUpload(file,meta,onProgress){
   return new Promise((resolve,reject)=>{
     const fd=new FormData();
     fd.append('file',file,file.name);
-    fd.append('name',file.name);
+    fd.append('name',filePath(file));   // keep subfolders so same-named tracks don't collide
     fd.append('meta',JSON.stringify(meta||{}));
     const xhr=new XMLHttpRequest();
     xhr.open('POST',adminURL(adminCfg.base,'/api/upload'));
@@ -1648,11 +1649,15 @@ function renderAdminManage(card,view){
       '<button class="m-btn ghost" id="admOut">Sign Out</button>'+
       '<button class="m-btn primary" id="admAdd">Add Songs</button>'+
     '</div>'+
+    (isIOS()
+      ? '<div class="modal-note" style="margin-top:8px">On iPhone: Add Songs → open your folder → tap Select → Select All → Open.</div>'
+      : '<div class="modal-actions" style="margin-top:8px"><button class="m-btn ghost" id="admAddFolder">Add Folder (includes subfolders)</button></div>')+
     '<div class="modal-actions" style="margin-top:8px">'+
       '<button class="m-btn ghost" id="admClose">Done</button>'+
     '</div>';
   $('#admClose').onclick=closeAdminModal;
   $('#admAdd').onclick=()=>$('#adminFiles').click();
+  const af=$('#admAddFolder'); if(af) af.onclick=()=>$('#adminFolder').click();
   $('#admOut').onclick=async()=>{ await clearAdminCfg(); renderAdmin(); };
   if(view.busy) $('#admAdd').disabled=true;
   refreshAdminList();
@@ -1720,6 +1725,7 @@ async function adminAddFiles(fileList){
   for(let i=0;i<files.length;i++){
     const f=files[i];
     if(txt) txt.textContent='Uploading '+(i+1)+' of '+files.length+' — '+f.name;
+    if(f.size>95*1024*1024){ failed++; admError(f.name+' is over the 100 MB upload limit.'); continue; }
     // Read the tags here so everyone gets good metadata without each device
     // having to range-request the file after syncing.
     let meta={};
@@ -1728,7 +1734,7 @@ async function adminAddFiles(fileList){
       const d=deriveTitleArtist(tags,f.name);
       meta.title=d.title;
       if(d.artist&&d.artist!=='Unknown Artist') meta.artist=d.artist;
-      const alb=stripJunk(tags.album); if(alb) meta.album=alb;
+      const alb=stripJunk(tags.album)||stripJunk(folderAlbum(filePath(f))); if(alb) meta.album=alb;
       const dur=await readDuration(f); if(dur) meta.duration=Math.round(dur*10)/10;
     }catch(e){}
     try{
@@ -2874,6 +2880,7 @@ function wireEvents(){
   $('#optAdmin').onclick=()=>{ closeAddSheet(); openAdminModal(); };
   $('#adminBackdrop').onclick=closeAdminModal;
   $('#adminFiles').onchange=e=>{ adminAddFiles(e.target.files); e.target.value=''; };
+  $('#adminFolder').onchange=e=>{ adminAddFiles(e.target.files); e.target.value=''; };
   $('#optClean').onclick=async()=>{ closeAddSheet();
     const n=await cleanLibraryNames();
     showToast(n?('Cleaned up '+n+' track name'+(n!==1?'s':'')+'.'):'Nothing to clean — names look fine.'); };

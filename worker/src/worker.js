@@ -70,19 +70,24 @@ function encodeKey(key) {
   return key.split('/').map(encodeURIComponent).join('/');
 }
 
-// Keep uploads to a safe, predictable key.
+// Keep uploads to a safe, predictable key. Subfolders are preserved so two
+// albums can each hold a "01 - Intro.mp3"; "." / ".." / empty segments are
+// dropped so a path can never climb out of the bucket.
 function safeKey(name) {
-  const base = String(name || '')
+  const segs = String(name || '')
     .replace(/\\/g, '/')
-    .split('/').pop()                 // no directory traversal
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .replace(/^\.+/, '')
-    .trim();
-  return base.slice(0, 180);
+    .split('/')
+    .map(seg => seg.replace(/[\u0000-\u001f\u007f]/g, '').trim())
+    .filter(seg => seg && seg !== '.' && seg !== '..')
+    .map(seg => seg.replace(/^\.+/, ''))
+    .filter(Boolean)
+    .slice(-5)                        // at most five levels deep
+    .map(seg => seg.slice(0, 180));
+  return segs.join('/').slice(0, 500);
 }
 
 function titleFromName(name) {
-  const base = name.replace(/\.[^.]+$/, '');
+  const base = String(name).split('/').pop().replace(/\.[^.]+$/, '');
   const m = /^\s*\d{1,3}\s*[-–—._)\]]\s*(.+)$/.exec(base);
   return (m ? m[1] : base).trim() || base;
 }
