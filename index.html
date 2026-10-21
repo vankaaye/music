@@ -687,7 +687,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 26';
+const BUILD='build 27';
 
 /* ============================================================
    Small helpers
@@ -1153,7 +1153,13 @@ function readDuration(file){
     a.preload='metadata';
     const url=URL.createObjectURL(file);
     let done=false;
-    const finish=v=>{ if(done)return;done=true;URL.revokeObjectURL(url);a.removeAttribute('src');resolve(v); };
+    const finish=v=>{
+      if(done)return; done=true;
+      URL.revokeObjectURL(url);
+      // removeAttribute alone leaves it loaded; pause + load() frees it now.
+      try{ a.pause(); a.removeAttribute('src'); a.load(); }catch(e){}
+      resolve(v);
+    };
     a.onloadedmetadata=()=>finish(isFinite(a.duration)?a.duration:0);
     a.onerror=()=>finish(0);
     // safety timeout
@@ -2686,7 +2692,7 @@ function wireEvents(){
     // guaranteed control is, rather than leaving a slider that might do nothing.
     if(isIOS() && airplayActive() && !volHintToasted){
       volHintToasted=true;
-      showToast('If the level doesn’t change, tap the AirPlay button — the picker has a volume slider for each device.');
+      showToast('No effect? Your receiver is probably fixed-volume. On Apple TV: Settings → Video and Audio → Volume Control. If sound goes through a TV or AVR, volume belongs to that.');
     }
   });
   $('#vol').addEventListener('change',saveLastState);
