@@ -1,0 +1,12 @@
+name = "music-admin"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+# The app's origin. Comma-separate to allow more (e.g. a local dev server).
+[vars]
+ALLOWED_ORIGINS = "https://vankaaye.github.io"
+
+# Bind the existing R2 bucket. ADMIN_PASSCODE is a secret, never put here.
+[[r2_buckets]]
+binding = "MUSIC"
+bucket_name = "music"

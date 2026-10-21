@@ -455,6 +455,25 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 #confirmModal{position:absolute;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:20px}
 .m-btn.danger{background:#ff3b30;color:#fff}
 
+/* admin: manage library */
+#adminModal{position:absolute;inset:0;z-index:68;display:flex;align-items:center;justify-content:center;padding:18px}
+#adminModal .modal-card{display:flex;flex-direction:column;max-height:88%}
+.adm-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.adm-top .modal-title{flex:1}
+.adm-count{font-size:12px;color:var(--text-2)}
+.adm-list{flex:1;overflow-y:auto;margin:4px -4px 10px;min-height:60px}
+.adm-row{display:flex;align-items:center;gap:10px;padding:8px 4px;border-top:1px solid var(--line)}
+.adm-row:first-child{border-top:0}
+.adm-meta{flex:1;min-width:0}
+.adm-t{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.adm-s{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.adm-del{width:28px;height:28px;flex:none;border-radius:50%;background:#ff3b30;color:#fff;
+  font-weight:700;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center}
+.adm-empty{font-size:14px;color:var(--text-2);text-align:center;padding:22px 8px;line-height:1.5}
+.adm-prog{font-size:13px;color:var(--text-2);margin:2px 0 10px}
+.adm-bar{height:4px;border-radius:2px;background:var(--panel-2);overflow:hidden;margin-top:6px}
+.adm-bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .15s linear}
+
 /* cloud connection bar */
 .cloud-bar{
   display:flex;align-items:center;gap:10px;
@@ -634,9 +653,17 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
       <button class="sheet-opt" id="optFolder">Choose Folder…</button>
       <button class="sheet-opt" id="optServer">Connect Server…</button>
       <button class="sheet-opt" id="optClean">Clean Up Names</button>
+      <button class="sheet-opt" id="optAdmin">Manage Library…</button>
       <button class="sheet-cancel" id="optCancel">Cancel</button>
     </div>
   </div>
+
+  <!-- Admin: manage the hosted library -->
+  <div id="adminModal" class="hidden" role="dialog" aria-label="Manage library">
+    <div class="modal-backdrop" id="adminBackdrop"></div>
+    <div class="modal-card" id="adminCard"></div>
+  </div>
+  <input type="file" id="adminFiles" accept="audio/*" multiple class="hidden">
 
   <!-- Server (WebDAV / TrueNAS) connection modal -->
   <div id="serverModal" class="hidden" role="dialog" aria-label="Connect server">
@@ -1485,6 +1512,227 @@ async function getLyrics(t){
   await cacheLyrics(t,{text,sync});
   const synced=sync?parseLRC(text):null;
   return {synced,plain:synced?null:text,source:'lrclib'};
+}
+
+/* ============================================================
+   Admin — manage the hosted library from inside the app.
+   Talks to the Cloudflare Worker (see worker/), which owns the R2 bucket and
+   rebuilds library.json after every change. Readers never use any of this;
+   they just load library.json.
+============================================================ */
+let adminCfg=null;            // { base, pass } — kept on this device only
+
+async function loadAdminCfg(){
+  if(!dbAvailable) return null;
+  try{
+    const m=await dbGetMeta('admin');
+    adminCfg = m && m.base ? {base:m.base, pass:m.pass||''} : null;
+  }catch(e){ adminCfg=null; }
+  return adminCfg;
+}
+async function saveAdminCfg(c){
+  adminCfg=c;
+  if(dbAvailable){ try{ await dbSetMeta('admin',c); }catch(e){} }
+}
+async function clearAdminCfg(){
+  adminCfg=null;
+  if(dbAvailable){ try{ await dbSetMeta('admin',{}); }catch(e){} }
+}
+
+function adminURL(base,path){ return String(base).replace(/\/+$/,'')+path; }
+
+async function adminCall(path,opts){
+  opts=opts||{};
+  const res=await fetch(adminURL(adminCfg.base,path),{
+    method:opts.method||'GET',
+    headers:Object.assign({'X-Admin-Passcode':adminCfg.pass},opts.headers||{}),
+    body:opts.body
+  });
+  let data={};
+  try{ data=await res.json(); }catch(e){}
+  if(!res.ok) throw new Error(data.error||('HTTP '+res.status));
+  return data;
+}
+
+// Upload one file with progress. fetch() cannot report upload progress, so XHR.
+function adminUpload(file,meta,onProgress){
+  return new Promise((resolve,reject)=>{
+    const fd=new FormData();
+    fd.append('file',file,file.name);
+    fd.append('name',file.name);
+    fd.append('meta',JSON.stringify(meta||{}));
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST',adminURL(adminCfg.base,'/api/upload'));
+    xhr.setRequestHeader('X-Admin-Passcode',adminCfg.pass);
+    xhr.upload.onprogress=e=>{ if(onProgress&&e.lengthComputable) onProgress(e.loaded/e.total); };
+    xhr.onload=()=>{
+      let d={}; try{ d=JSON.parse(xhr.responseText); }catch(e){}
+      if(xhr.status>=200&&xhr.status<300) resolve(d);
+      else reject(new Error(d.error||('HTTP '+xhr.status)));
+    };
+    xhr.onerror=()=>reject(new Error('Network or CORS error reaching the Worker.'));
+    xhr.send(fd);
+  });
+}
+
+/* ---- UI ---- */
+function openAdminModal(){ $('#adminModal').classList.remove('hidden'); renderAdmin(); }
+function closeAdminModal(){ $('#adminModal').classList.add('hidden'); }
+
+function renderAdmin(view){
+  const card=$('#adminCard');
+  card.innerHTML='';
+  if(!adminCfg){ renderAdminLogin(card); return; }
+  renderAdminManage(card,view);
+}
+
+function renderAdminLogin(card){
+  card.innerHTML=
+    '<div class="modal-title">Manage Library</div>'+
+    '<div class="modal-sub">Sign in to add or remove songs for everyone. Only needed on your own device.</div>'+
+    '<label class="fld">Worker URL'+
+      '<input id="admUrl" type="url" inputmode="url" autocapitalize="off" autocorrect="off" placeholder="https://music-admin.<you>.workers.dev">'+
+    '</label>'+
+    '<label class="fld">Admin passcode'+
+      '<input id="admPass" type="password" autocomplete="current-password">'+
+    '</label>'+
+    '<div class="modal-note">Stored only on this device. Everyone else just opens the app — they need none of this.</div>'+
+    '<div class="modal-err hidden" id="admErr"></div>'+
+    '<div class="modal-actions">'+
+      '<button class="m-btn ghost" id="admCancel">Cancel</button>'+
+      '<button class="m-btn primary" id="admSignIn">Sign In</button>'+
+    '</div>';
+  if(adminCfg) $('#admUrl').value=adminCfg.base;
+  $('#admCancel').onclick=closeAdminModal;
+  $('#admSignIn').onclick=async()=>{
+    const base=$('#admUrl').value.trim(), pass=$('#admPass').value;
+    const err=$('#admErr');
+    const show=m=>{ err.textContent=m; err.classList.remove('hidden'); };
+    if(!/^https?:\/\//i.test(base)) return show('Enter the Worker URL, starting with https://');
+    if(!pass) return show('Enter the admin passcode.');
+    const btn=$('#admSignIn'); btn.disabled=true; btn.textContent='Checking…';
+    const prev=adminCfg; adminCfg={base,pass};
+    try{
+      await adminCall('/api/ping');
+      await saveAdminCfg({base,pass});
+      renderAdmin();
+    }catch(e){
+      adminCfg=prev;
+      btn.disabled=false; btn.textContent='Sign In';
+      show(/401/.test(e.message)?'Wrong passcode.':e.message);
+    }
+  };
+}
+
+function renderAdminManage(card,view){
+  view=view||{};
+  card.innerHTML=
+    '<div class="adm-top">'+
+      '<div class="modal-title">Manage Library</div>'+
+      '<span class="adm-count" id="admCount"></span>'+
+    '</div>'+
+    '<div class="adm-prog hidden" id="admProg"><span id="admProgTxt"></span>'+
+      '<div class="adm-bar"><i id="admProgBar"></i></div></div>'+
+    '<div class="modal-err hidden" id="admErr"></div>'+
+    '<div class="adm-list" id="admList"><div class="adm-empty">Loading…</div></div>'+
+    '<div class="modal-actions">'+
+      '<button class="m-btn ghost" id="admOut">Sign Out</button>'+
+      '<button class="m-btn primary" id="admAdd">Add Songs</button>'+
+    '</div>'+
+    '<div class="modal-actions" style="margin-top:8px">'+
+      '<button class="m-btn ghost" id="admClose">Done</button>'+
+    '</div>';
+  $('#admClose').onclick=closeAdminModal;
+  $('#admAdd').onclick=()=>$('#adminFiles').click();
+  $('#admOut').onclick=async()=>{ await clearAdminCfg(); renderAdmin(); };
+  if(view.busy) $('#admAdd').disabled=true;
+  refreshAdminList();
+}
+
+function admError(msg){
+  const e=$('#admErr'); if(!e) return;
+  e.textContent=msg; e.classList.remove('hidden');
+}
+
+async function refreshAdminList(){
+  const box=$('#admList'); if(!box) return;
+  try{
+    const d=await adminCall('/api/list');
+    const cnt=$('#admCount'); if(cnt) cnt.textContent=d.count+' song'+(d.count!==1?'s':'');
+    box.innerHTML='';
+    if(!d.songs.length){
+      box.innerHTML='<div class="adm-empty">No songs yet. Add some — they appear for everyone.</div>';
+      return;
+    }
+    for(const sg of d.songs){
+      const row=el('div','adm-row');
+      const m=el('div','adm-meta');
+      const t=el('div','adm-t'); t.textContent=sg.title||sg.key;
+      const sb=el('div','adm-s');
+      sb.textContent=[sg.artist,sg.album,sg.size?fmtMB(sg.size):''].filter(Boolean).join(' · ');
+      m.appendChild(t); if(sb.textContent) m.appendChild(sb);
+      const del=el('button','adm-del'); del.textContent='−';
+      del.setAttribute('aria-label','Delete '+(sg.title||sg.key));
+      del.onclick=async()=>{
+        const ok=await confirmSheet('Delete “'+(sg.title||sg.key)+'”?',
+          'This removes it from the library for everyone.','Delete');
+        if(!ok) return;
+        try{
+          await adminCall('/api/delete',{method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({key:sg.key})});
+          await refreshAdminList();
+          await refreshLibraryAfterAdmin();
+          showToast('Deleted.');
+        }catch(e){ admError(e.message); }
+      };
+      row.appendChild(m); row.appendChild(del);
+      box.appendChild(row);
+    }
+  }catch(e){
+    box.innerHTML='';
+    admError(/401/.test(e.message)?'Passcode no longer accepted — sign in again.':e.message);
+  }
+}
+
+// Pull the rebuilt library.json straight back in, so the app reflects the change.
+async function refreshLibraryAfterAdmin(){
+  if(!serverCfg) return;
+  try{ await syncRemote({withOverlay:false}); }catch(e){}
+}
+
+async function adminAddFiles(fileList){
+  const files=Array.from(fileList).filter(f=>/^audio\//.test(f.type)||AUDIO_RE.test(f.name));
+  if(!files.length) return;
+  const prog=$('#admProg'), txt=$('#admProgTxt'), bar=$('#admProgBar');
+  if(prog) prog.classList.remove('hidden');
+  const add=$('#admAdd'); if(add) add.disabled=true;
+  let done=0, failed=0;
+  for(let i=0;i<files.length;i++){
+    const f=files[i];
+    if(txt) txt.textContent='Uploading '+(i+1)+' of '+files.length+' — '+f.name;
+    // Read the tags here so everyone gets good metadata without each device
+    // having to range-request the file after syncing.
+    let meta={};
+    try{
+      const tags=await parseID3(f);
+      const d=deriveTitleArtist(tags,f.name);
+      meta.title=d.title;
+      if(d.artist&&d.artist!=='Unknown Artist') meta.artist=d.artist;
+      const alb=stripJunk(tags.album); if(alb) meta.album=alb;
+      const dur=await readDuration(f); if(dur) meta.duration=Math.round(dur*10)/10;
+    }catch(e){}
+    try{
+      await adminUpload(f,meta,fr=>{ if(bar) bar.style.width=Math.round(fr*100)+'%'; });
+      done++;
+    }catch(e){ failed++; admError(e.message); }
+    if(bar) bar.style.width='0%';
+  }
+  if(prog) prog.classList.add('hidden');
+  if(add) add.disabled=false;
+  await refreshAdminList();
+  await refreshLibraryAfterAdmin();
+  showToast(done+' song'+(done!==1?'s':'')+' added'+(failed?(', '+failed+' failed'):'')+'.');
 }
 
 /* ============================================================
