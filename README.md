@@ -19,8 +19,11 @@ device.
   existing library is cleaned once automatically and **Clean Up Names** in the
   Add menu re-runs it. Browse by Songs,
   Albums (artwork grid) or Artists, drill into a group, and search across
-  title / artist / album. Edit mode removes songs. Shows song count and how
-  much storage the library uses.
+  title / artist / album. Album artwork is a small reflowing grid — two across
+  on a phone, more in a wider window — rather than two stretched tiles. Edit
+  mode removes a single song with one tap, or a whole album or artist after a
+  confirmation naming how many songs go. Shows song count and how much storage
+  the library uses.
 - **Storage** — audio blobs, artwork and metadata are persisted in IndexedDB
   so the library survives reloads (`navigator.storage.persist()` is requested
   on first import). Duplicate files (same name + size) are skipped, with live
@@ -64,6 +67,11 @@ device.
   send on-device audio, use **Control Centre → Screen Mirroring**, which carries
   the device's own output; the AirPlay control in the Now Playing card uses the
   same hand-off mechanism and fails the same way.
+- **Queue** — a "Playing Next" button in Now Playing lists what's coming up,
+  Apple Music style: the current track pinned at the top with animated bars,
+  then the rest of the queue. Tap a row to jump to it, or remove one from the
+  queue without deleting it from the library. Lyrics and the queue share the
+  artwork area, one at a time, and Back steps out of whichever is open.
 - **Lyrics** — a lyrics button in Now Playing shows time-synced lyrics with the
   current line highlighted and auto-scrolled, Apple Music style; tap any line to
   jump to it. Lyrics come from the file's own embedded ID3 tags first, then from

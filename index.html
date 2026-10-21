@@ -126,8 +126,12 @@ input{font-family:inherit}
 
 /* album grid */
 .grid{
-  display:grid;grid-template-columns:1fr 1fr;gap:16px;
-  padding:8px calc(16px + var(--sar)) 8px calc(16px + var(--sal));
+  display:grid;
+  /* Small, fixed-ish tiles that reflow: 2 across on a phone, many on a desktop
+     window, instead of stretching two tiles to fill the screen. */
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:20px 14px;
+  padding:10px calc(16px + var(--sar)) 8px calc(16px + var(--sal));
 }
 .album-cell{min-width:0}
 .album-cell .art{
@@ -136,9 +140,15 @@ input{font-family:inherit}
 }
 .album-cell .art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .album-cell .art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
-.album-cell .art .ph svg{width:40px;height:40px;fill:var(--text-2)}
-.album-cell .name{font-size:15px;font-weight:600;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.album-cell .by{font-size:13px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.album-cell .art .ph svg{width:32px;height:32px;fill:var(--text-2)}
+.album-cell .name{font-size:14px;font-weight:600;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.album-cell{position:relative}
+.cell-del{
+  position:absolute;top:-7px;left:-7px;z-index:2;width:24px;height:24px;border-radius:50%;
+  background:#ff3b30;color:#fff;font-weight:700;font-size:17px;line-height:1;
+  display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6);
+}
+.album-cell .by{font-size:12px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* drill-in header (Apple-style album / artist page) */
 .drill-topbar{display:flex;align-items:center;padding:6px 8px 2px}
@@ -179,6 +189,7 @@ input{font-family:inherit}
 .artist .circle img{width:100%;height:100%;object-fit:cover}
 .artist .name{font-size:16px;font-weight:500;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .artist .cnt{font-size:13px;color:var(--text-2)}
+.artist .del{width:26px;height:26px;border-radius:50%;background:#ff3b30;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px}
 .chev{width:18px;height:18px;fill:var(--text-2);flex:none}
 
 /* empty & footer states */
@@ -237,6 +248,9 @@ input{font-family:inherit}
 #np .np-inner{
   position:relative;z-index:1;flex:1;display:flex;flex-direction:column;
   padding:calc(var(--sat) + 8px) calc(24px + var(--sar)) calc(var(--sab) + 20px) calc(24px + var(--sal));
+  /* Without this the scrubber and controls stretch the full width of a desktop
+     window while the artwork stays small, which looks broken. */
+  width:100%;max-width:560px;margin:0 auto;
 }
 .np-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex:none}
 .np-head-sp{width:86px;flex:none}
@@ -257,6 +271,35 @@ input{font-family:inherit}
 #npArt img{width:100%;height:100%;object-fit:cover}
 #npArt .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
 #npArt .ph svg{width:72px;height:72px;fill:var(--text-2)}
+/* queue — Apple-style "Playing Next" */
+#npQueue{flex:1;min-height:0;display:flex;flex-direction:column;margin:4px 0}
+.q-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:2px 0 10px;scrollbar-width:none}
+.q-scroll::-webkit-scrollbar{display:none}
+.q-head{font-size:19px;font-weight:700;padding:6px 2px 2px}
+.q-sub{font-size:13px;color:rgba(255,255,255,.55);padding:0 2px 10px}
+.q-row{display:flex;align-items:center;gap:12px;padding:8px 2px;cursor:pointer;border-radius:8px}
+.q-row:active{background:rgba(255,255,255,.08)}
+.q-row.now{background:rgba(255,255,255,.08)}
+.q-art{width:44px;height:44px;border-radius:5px;flex:none;position:relative;overflow:hidden;background:rgba(255,255,255,.12)}
+.q-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.q-art .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.q-art .ph svg{width:18px;height:18px;fill:rgba(255,255,255,.45)}
+.q-meta{flex:1;min-width:0}
+.q-t{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.q-row.now .q-t{color:var(--accent)}
+.q-s{font-size:13px;color:rgba(255,255,255,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.q-x{width:30px;height:30px;flex:none;display:flex;align-items:center;justify-content:center;border-radius:50%;color:rgba(255,255,255,.5)}
+.q-x svg{width:17px;height:17px;fill:currentColor}
+.q-x:active{background:rgba(255,255,255,.14)}
+.q-empty{font-size:15px;color:rgba(255,255,255,.55);text-align:center;padding:28px 12px;line-height:1.5}
+.q-playing-bars{display:flex;align-items:flex-end;gap:2px;height:13px;flex:none}
+.q-playing-bars i{width:2.5px;background:var(--accent);border-radius:1px;animation:qbar .9s ease-in-out infinite}
+.q-playing-bars i:nth-child(1){height:60%;animation-delay:-.2s}
+.q-playing-bars i:nth-child(2){height:100%;animation-delay:-.5s}
+.q-playing-bars i:nth-child(3){height:45%}
+@keyframes qbar{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+@media (prefers-reduced-motion:reduce){.q-playing-bars i{animation:none}}
+
 /* lyrics */
 #npLyrics{flex:1;min-height:0;display:flex;flex-direction:column;margin:4px 0}
 .lyr-scroll{
@@ -406,6 +449,9 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 .m-btn:active{opacity:.85}
 .m-btn[disabled]{opacity:.5}
 
+#confirmModal{position:absolute;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:20px}
+.m-btn.danger{background:#ff3b30;color:#fff}
+
 /* cloud connection bar */
 .cloud-bar{
   display:flex;align-items:center;gap:10px;
@@ -509,6 +555,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
         <div id="npArt"><div class="ph"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg></div></div>
       </div>
       <div id="npLyrics" class="hidden"><div class="lyr-scroll" id="lyrScroll"></div></div>
+      <div id="npQueue" class="hidden"><div class="q-scroll" id="qScroll"></div></div>
       <div class="np-titles">
         <div class="tt-block">
           <div class="t" id="npTitle">Not Playing</div>
@@ -516,6 +563,9 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
         </div>
         <button id="btnLyrics" class="lyr-toggle" aria-label="Show lyrics">
           <svg viewBox="0 0 24 24"><path d="M4 5.5h16v2H4v-2zm0 5h11v2H4v-2zm0 5h16v2H4v-2zm13-5h3v2h-3v-2z"/></svg>
+        </button>
+        <button id="btnQueue" class="lyr-toggle" aria-label="Playing next">
+          <svg viewBox="0 0 24 24"><path d="M3 6h11v2H3V6zm0 5h11v2H3v-2zm0 5h7v2H3v-2zm13-1.2V8l6 3.4-6 3.4z"/></svg>
         </button>
       </div>
       <div class="np-scrub">
@@ -630,7 +680,7 @@ input[type=range].bar::-moz-range-thumb{width:16px;height:16px;border:0;border-r
 "use strict";
 (function(){
 // Shown in the library footer so you can confirm which build is running.
-const BUILD='build 24';
+const BUILD='build 25';
 
 /* ============================================================
    Small helpers
@@ -1747,7 +1797,15 @@ function renderAlbums(){
     const nm=el('div','name'); nm.textContent=name;
     const by=el('div','by'); by.textContent=[...new Set(songs.map(s=>s.artist))].join(', ');
     cell.appendChild(art); cell.appendChild(nm); cell.appendChild(by);
-    cell.onclick=()=>{ state.drill={type:'album',key:name}; render(); scrollTop(); };
+    if(state.editMode){
+      const del=el('button','cell-del'); del.textContent='−';
+      del.setAttribute('aria-label','Remove album '+name);
+      del.onclick=e=>{ e.stopPropagation(); removeGroup('album',name); };
+      cell.appendChild(del);
+      cell.onclick=null;
+    }else{
+      cell.onclick=()=>{ state.drill={type:'album',key:name}; render(); scrollTop(); };
+    }
     grid.appendChild(cell);
   }
   content.appendChild(grid);
@@ -1774,8 +1832,16 @@ function renderArtists(){
     chevWrap.querySelector('svg').style.fill='none';
     chevWrap.querySelector('svg').style.stroke='var(--text-2)';
     chevWrap.querySelector('svg').style.strokeWidth='2';
-    row.appendChild(chevWrap);
-    row.onclick=()=>{ state.drill={type:'artist',key:name}; render(); scrollTop(); };
+    if(state.editMode){
+      chevWrap.remove();
+      const del=el('button','del'); del.textContent='−';
+      del.setAttribute('aria-label','Remove artist '+name);
+      del.onclick=e=>{ e.stopPropagation(); removeGroup('artist',name); };
+      row.appendChild(del);
+    }else{
+      row.appendChild(chevWrap);
+      row.onclick=()=>{ state.drill={type:'artist',key:name}; render(); scrollTop(); };
+    }
     frag.appendChild(row);
   }
   content.appendChild(frag);
@@ -1883,6 +1949,46 @@ function updateTabsUI(){
 /* ============================================================
    Remove track
 ============================================================ */
+/* Remove every track in an album or by an artist. Bulk and destructive, so it
+   asks first — unlike removing a single song, which is one obvious tap. */
+async function removeGroup(type,key){
+  const ids=state.tracks
+    .filter(t=> type==='album' ? (t.album||'Unknown Album')===key
+                               : (t.artist||'Unknown Artist')===key)
+    .map(t=>t.id);
+  if(!ids.length) return;
+  const what=ids.length+' song'+(ids.length!==1?'s':'');
+  const ok=await confirmSheet('Remove “'+key+'”?', 'This deletes '+what+' from your library on this device.','Remove');
+  if(!ok) return;
+  for(const id of ids) await removeTrack(id);
+  showToast('Removed '+what+'.');
+}
+
+/* Minimal promise-based confirmation using the existing modal styling. */
+function confirmSheet(title,body,confirmLabel){
+  return new Promise(resolve=>{
+    const wrap=el('div'); wrap.id='confirmModal';
+    wrap.innerHTML=
+      '<div class="modal-backdrop"></div>'+
+      '<div class="modal-card">'+
+        '<div class="modal-title"></div>'+
+        '<div class="modal-sub"></div>'+
+        '<div class="modal-actions">'+
+          '<button class="m-btn ghost" data-no>Cancel</button>'+
+          '<button class="m-btn danger" data-yes></button>'+
+        '</div>'+
+      '</div>';
+    wrap.querySelector('.modal-title').textContent=title;
+    wrap.querySelector('.modal-sub').textContent=body;
+    wrap.querySelector('[data-yes]').textContent=confirmLabel||'Remove';
+    const done=v=>{ wrap.remove(); resolve(v); };
+    wrap.querySelector('[data-no]').onclick=()=>done(false);
+    wrap.querySelector('[data-yes]').onclick=()=>done(true);
+    wrap.querySelector('.modal-backdrop').onclick=()=>done(false);
+    document.getElementById('app').appendChild(wrap);
+  });
+}
+
 async function removeTrack(id){
   const idx=state.tracks.findIndex(t=>t.id===id);
   if(idx<0)return;
@@ -1946,6 +2052,7 @@ function loadTrack(id,autoplay){
   updateNowPlayingUI(t);
   setMediaSession(t);
   if(lyr.open) loadLyricsForCurrent(true);   // new track -> refresh lyrics
+  if(qOpen) renderQueue();
   if(autoplay){
     audio.play().then(()=>{state.playing=true;syncPlayUI();}).catch(()=>{state.playing=false;syncPlayUI();});
   }else{
@@ -2170,17 +2277,114 @@ const lyr={open:false,synced:null,plain:null,forId:null,idx:-1,userScroll:0,load
 
 function setLyricsOpen(on){
   lyr.open=on;
+  if(on) qOpen=false;                       // one panel at a time
   $('#npLyrics').classList.toggle('hidden',!on);
-  $('.np-art-wrap').classList.toggle('hidden',on);
+  $('#npQueue').classList.toggle('hidden',!qOpen);
+  $('.np-art-wrap').classList.toggle('hidden',on||qOpen);
   $('#btnLyrics').classList.toggle('on',on);
+  $('#btnQueue').classList.toggle('on',qOpen);
   $('#btnLyrics').setAttribute('aria-label',on?'Hide lyrics':'Show lyrics');
   if(on) loadLyricsForCurrent();
+}
+
+/* ============================================================
+   Queue — Apple-style "Playing Next"
+============================================================ */
+let qOpen=false;
+
+function setQueueOpen(on){
+  qOpen=on;
+  if(on) lyr.open=false;                    // one panel at a time
+  $('#npQueue').classList.toggle('hidden',!on);
+  $('#npLyrics').classList.toggle('hidden',!lyr.open);
+  $('.np-art-wrap').classList.toggle('hidden',on||lyr.open);
+  $('#btnQueue').classList.toggle('on',on);
+  $('#btnLyrics').classList.toggle('on',lyr.open);
+  $('#btnQueue').setAttribute('aria-label',on?'Hide queue':'Playing next');
+  if(on) renderQueue();
+}
+
+function qThumb(t){
+  const a=el('div','q-art');
+  const cu=coverURL(t);
+  if(cu){ const i=el('img'); i.src=cu; i.loading='lazy'; a.appendChild(i); }
+  else a.innerHTML=PLACEHOLDER_ART;
+  return a;
+}
+
+function renderQueue(){
+  const box=$('#qScroll');
+  box.innerHTML='';
+  if(state.qIndex<0||!state.queue.length){
+    box.innerHTML='<div class="q-empty">Nothing is playing.</div>';
+    return;
+  }
+  const cur=trackById(state.queue[state.qIndex]);
+
+  // currently playing, pinned at the top like Apple Music
+  if(cur){
+    const h=el('div','q-head'); h.textContent='Now Playing'; box.appendChild(h);
+    const row=el('div','q-row now');
+    row.appendChild(qThumb(cur));
+    const m=el('div','q-meta');
+    const t=el('div','q-t'); t.textContent=displayTitle(cur);
+    const sub=el('div','q-s'); sub.textContent=cur.artist||'Unknown Artist';
+    m.appendChild(t); m.appendChild(sub); row.appendChild(m);
+    const bars=el('div','q-playing-bars'); bars.innerHTML='<i></i><i></i><i></i>';
+    if(!state.playing) bars.style.visibility='hidden';
+    row.appendChild(bars);
+    row.onclick=()=>{ closeNP(); };
+    box.appendChild(row);
+  }
+
+  const upcoming=state.queue.slice(state.qIndex+1);
+  const h2=el('div','q-head'); h2.textContent='Playing Next'; h2.style.marginTop='14px';
+  box.appendChild(h2);
+  const sub=el('div','q-sub');
+  sub.textContent = state.shuffle ? 'Shuffled' :
+    (state.repeat==='one' ? 'Repeating this song' :
+     state.repeat==='all' ? 'Repeating all' : '');
+  if(sub.textContent) box.appendChild(sub);
+
+  if(!upcoming.length){
+    box.appendChild(Object.assign(el('div','q-empty'),
+      {textContent:'Nothing further in the queue.'}));
+    return;
+  }
+
+  upcoming.forEach((id,i)=>{
+    const t=trackById(id);
+    if(!t) return;
+    const row=el('div','q-row');
+    row.appendChild(qThumb(t));
+    const m=el('div','q-meta');
+    const tt=el('div','q-t'); tt.textContent=displayTitle(t);
+    const ss=el('div','q-s'); ss.textContent=t.artist||'Unknown Artist';
+    m.appendChild(tt); m.appendChild(ss); row.appendChild(m);
+    const x=el('button','q-x');
+    x.setAttribute('aria-label','Remove from queue');
+    x.innerHTML='<svg viewBox="0 0 24 24"><path d="M18.3 5.7L12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4L10.6 10.6l6.3-6.3z"/></svg>';
+    x.onclick=e=>{ e.stopPropagation(); removeFromQueue(state.qIndex+1+i); };
+    row.appendChild(x);
+    // jump straight to that track
+    row.onclick=()=>{ state.qIndex=state.qIndex+1+i; loadTrack(state.queue[state.qIndex],true); renderQueue(); };
+    box.appendChild(row);
+  });
+}
+
+// Drop one entry from the play order without touching the library.
+function removeFromQueue(idx){
+  if(idx<=state.qIndex||idx>=state.queue.length) return;
+  state.queue.splice(idx,1);
+  renderQueue();
+  saveLastState();
 }
 
 function currentTrack(){ return state.qIndex>=0 ? trackById(state.queue[state.qIndex]) : null; }
 
 // One step back: from lyrics to the now playing view, otherwise to the library.
 function npBack(){
+  if(qOpen){ setQueueOpen(false); return; }
   if(lyr.open){ setLyricsOpen(false); return; }
   closeNP();
 }
@@ -2399,8 +2603,9 @@ function wireEvents(){
   // Back steps out one level: lyrics -> now playing -> library.
   $('#npBack').onclick=npBack;
 
-  // lyrics
+  // lyrics / queue
   $('#btnLyrics').onclick=()=>setLyricsOpen(!lyr.open);
+  $('#btnQueue').onclick=()=>setQueueOpen(!qOpen);
   $('#lyrScroll').addEventListener('scroll',()=>{ lyr.userScroll=Date.now(); },{passive:true});
   $('#scrub').addEventListener('change',()=>syncLyrics(true));
 
